@@ -91,7 +91,8 @@ def show_session(connection):
     user, role = run_query(connection, "SELECT CURRENT_USER(), CURRENT_ROLE()")[0]
     tls = dict(run_query(connection, "SHOW SESSION STATUS WHERE Variable_name IN ('Ssl_version', 'Ssl_cipher')"))
     print(f"Logged in as : {user}   (active role: {role})")
-    print(f"TLS          : {tls['Ssl_version']}  {tls['Ssl_cipher']}  (server certificate verified against certs/ca.pem)")
+    print(f"TLS          : {tls['Ssl_version']}  {tls['Ssl_cipher']}  "
+          "(server certificate verified against certs/ca.pem)")
 
 
 def run_demo(role):

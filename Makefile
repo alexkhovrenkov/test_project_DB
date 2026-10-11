@@ -32,7 +32,7 @@ help:
 	@echo "make down                   stop the server (keeps the data)"
 	@echo "make reset                  stop the server and DELETE its data; next 'make up' starts from scratch"
 	@echo "make clean                  reset + delete certificates and the virtual environment"
-	@echo "make lint                   shellcheck the shell scripts (needs shellcheck installed)"
+	@echo "make lint                   ruff (Python) + shellcheck (shell scripts; uses its Docker image if not installed)"
 
 certs:
 	@if [ ! -f certs/client-key.pem ]; then bash scripts/generate_certs.sh; fi
@@ -90,5 +90,10 @@ reset:
 clean: reset
 	rm -rf .venv certs .pytest_cache
 
-lint:
-	shellcheck scripts/*.sh sql/*.sh experiments/*.sh
+SHELL_SCRIPTS := scripts/*.sh sql/*.sh experiments/*.sh
+
+lint: venv
+	$(PYTHON) -m ruff check app tests
+	@if command -v shellcheck >/dev/null; then shellcheck $(SHELL_SCRIPTS); \
+	else docker run --rm -v "$(CURDIR):/mnt" -w /mnt koalaman/shellcheck:stable $(SHELL_SCRIPTS); fi
+	@echo "lint: no findings"

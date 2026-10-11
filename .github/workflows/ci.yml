@@ -42,10 +42,13 @@ jobs:
           cache: pip
           cache-dependency-path: requirements*.txt
 
-      - name: Lint shell scripts
-        run: shellcheck scripts/*.sh sql/*.sh experiments/*.sh
+      - name: Install Python dependencies
+        run: make venv
 
-      - name: Start MariaDB 13.1 (random passwords, fresh certificates, TLS on)
+      - name: Lint (ruff + shellcheck)
+        run: make lint
+
+      - name: Start MariaDB 13.1 (fresh certificates, TLS on, no passwords)
         run: make up
         env:
           MARIADB_IMAGE: ${{ env.PINNED_IMAGE }}
@@ -54,9 +57,6 @@ jobs:
         run: docker compose exec -T mariadb mariadbd --version
         env:
           MARIADB_IMAGE: ${{ env.PINNED_IMAGE }}
-
-      - name: Install Python dependencies
-        run: make venv
 
       - name: Run the test suite
         run: make test

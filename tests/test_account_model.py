@@ -18,8 +18,16 @@ import pytest
 
 from admin import DOCKER, HARNESS_NAME, socket_sql
 from conftest import error_code
-from database import (ACCOUNTS, CONTAINER, PROJECT_DIR, connect, password_for, remember_password, run_query,
-                      strong_password)
+from database import (
+    ACCOUNTS,
+    CONTAINER,
+    PROJECT_DIR,
+    connect,
+    password_for,
+    remember_password,
+    run_query,
+    strong_password,
+)
 
 ACCESS_DENIED = 1045
 ACCESS_DENIED_NO_PASSWORD = 1698   # what a failed unix_socket login returns

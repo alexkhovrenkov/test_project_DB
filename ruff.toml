@@ -1,0 +1,10 @@
+# Minimal lint configuration: pyflakes, pycodestyle, import order, bugbear, pyupgrade.
+line-length = 120
+target-version = "py310"
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[lint.isort]
+# app/ and tests/ modules are imported by bare name (pytest.ini sets pythonpath).
+known-first-party = ["actions", "admin", "conftest", "database", "demo", "menu", "sqlrunner"]

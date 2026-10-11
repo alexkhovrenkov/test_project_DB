@@ -42,9 +42,9 @@ identifier is safe.
 
 import argparse
 import re
+import secrets
 import sys
 from dataclasses import dataclass, field
-import secrets
 from pathlib import Path
 
 import pymysql
@@ -205,7 +205,7 @@ def render_rows(rows):
         return ["(no rows)"]
     shown = [tuple("NULL" if value is None else str(value) for value in row) for row in rows[:MAX_ROWS_SHOWN]]
     widths = [max(len(row[i]) for row in shown) for i in range(len(shown[0]))]
-    lines = ["  ".join(value.ljust(width) for value, width in zip(row, widths)).rstrip() for row in shown]
+    lines = ["  ".join(value.ljust(width) for value, width in zip(row, widths, strict=True)).rstrip() for row in shown]
     if len(rows) > MAX_ROWS_SHOWN:
         lines.append(f"... {len(rows) - MAX_ROWS_SHOWN} more rows")
     return lines
@@ -295,7 +295,8 @@ def run_script(path, harness, quiet=False, out=print):
                 continue
             if step.phase != "demo":
                 if not quiet or not ok:
-                    out(f"  [{step.phase}] {verdict} {one_line(step.text)}" + ("" if ok else f"\n           got: {outcome}"))
+                    detail = "" if ok else f"\n           got: {outcome}"
+                    out(f"  [{step.phase}] {verdict} {one_line(step.text)}{detail}")
                 continue
             number += 1
             if quiet:

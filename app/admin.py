@@ -43,8 +43,7 @@ import sys
 import pymysql
 from pymysql.converters import escape_item
 
-from database import (ACCOUNTS, CONTAINER, ConfigError, connect, remember_password, run_query,
-                      strong_password)
+from database import ACCOUNTS, CONTAINER, ConfigError, connect, remember_password, run_query, strong_password
 
 DOCKER = os.environ.get("DOCKER", "docker")
 DEMO_USERS = tuple(ACCOUNTS.values())

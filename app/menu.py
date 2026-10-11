@@ -110,4 +110,4 @@ if __name__ == "__main__":
     try:
         main()
     except ConfigError as error:
-        raise SystemExit(f"ERROR: {error}")
+        raise SystemExit(f"ERROR: {error}") from None
