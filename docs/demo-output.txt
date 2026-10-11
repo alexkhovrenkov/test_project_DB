@@ -1,0 +1,2313 @@
+
+subject=CN=localhost
+issuer=CN=University Demo CA
+X509v3 Subject Alternative Name: 
+    DNS:localhost
+server-cert.pem: OK
+client-cert.pem: OK
+docker compose up -d --wait
+ Network fresh_default Creating 
+ Network fresh_default Creating 
+ Network fresh_default Created 
+ Network fresh_default Created 
+ Container university-db Creating 
+ Container university-db Created 
+ Container university-db Starting 
+ Container university-db Started 
+ Container university-db Waiting 
+ Container university-db Healthy 
+python3 -m venv .venv
+.venv/bin/python -m pip install --quiet --upgrade pip
+.venv/bin/python -m pip install --quiet -r requirements-dev.txt
+touch .venv/.installed
+.venv/bin/python app/demo.py
+
+==============================================================================
+ ROLE: student   (MariaDB account: alice_student)
+==============================================================================
+Logged in as : alice_student@%   (active role: student_role)
+TLS          : TLSv1.3  TLS_AES_256_GCM_SHA384  (server certificate verified against certs/ca.pem)
+
+[1/6] Read the course list
+    User     : alice_student (role student_role)
+    SQL      : SELECT code, title, credits, professor FROM courses
+    Expected : allowed
+    Actual   : allowed (4 rows)
+    Result   : PASS
+    Why      : GRANT SELECT ON courses TO student_role
+
+[2/6] Read my own grades (view)
+    User     : alice_student (role student_role)
+    SQL      : SELECT code, title, grade FROM my_grades
+    Expected : allowed
+    Actual   : allowed (2 rows)
+    Result   : PASS
+    Why      : GRANT SELECT ON my_grades; the view filters by USER()
+
+[3/6] Read student contact details
+    User     : alice_student (role student_role)
+    SQL      : SELECT student_id, first_name, last_name, email FROM students
+    Expected : denied (error 1142)
+    Actual   : denied (error 1142)
+    MariaDB  : SELECT command denied to user 'alice_student'@'172.18.0.1' for table `university`.`students`
+    Result   : PASS
+    Why      : student_role has no privilege on students
+
+[4/6] Read ALL grades
+    User     : alice_student (role student_role)
+    SQL      : SELECT grade_id, student_id, course_id, grade FROM grades
+    Expected : denied (error 1142)
+    Actual   : denied (error 1142)
+    MariaDB  : SELECT command denied to user 'alice_student'@'172.18.0.1' for table `university`.`grades`
+    Result   : PASS
+    Why      : no privilege on grades (students use the my_grades view)
+
+[5/6] Change a grade
+    User     : alice_student (role student_role)
+    SQL      : UPDATE grades SET grade = %s WHERE grade_id = %s
+    Expected : denied (error 1142)
+    Actual   : denied (error 1142)
+    MariaDB  : UPDATE command denied to user 'alice_student'@'172.18.0.1' for table `university`.`grades`
+    Result   : PASS
+    Why      : no UPDATE privilege on grades
+
+[6/6] Read financial records (IBANs)
+    User     : alice_student (role student_role)
+    SQL      : SELECT student_id, tuition_due, amount_paid, bank_iban FROM financial_records
+    Expected : denied (error 1142)
+    Actual   : denied (error 1142)
+    MariaDB  : SELECT command denied to user 'alice_student'@'172.18.0.1' for table `university`.`financial_records`
+    Result   : PASS
+    Why      : no privilege on financial_records
+
+==============================================================================
+ ROLE: professor   (MariaDB account: smith_professor)
+==============================================================================
+Logged in as : smith_professor@%   (active role: professor_role)
+TLS          : TLSv1.3  TLS_AES_256_GCM_SHA384  (server certificate verified against certs/ca.pem)
+
+[1/6] Read the course list
+    User     : smith_professor (role professor_role)
+    SQL      : SELECT code, title, credits, professor FROM courses
+    Expected : allowed
+    Actual   : allowed (4 rows)
+    Result   : PASS
+    Why      : GRANT SELECT ON university.* TO professor_role
+
+[2/6] Read my own grades (view)
+    User     : smith_professor (role professor_role)
+    SQL      : SELECT code, title, grade FROM my_grades
+    Expected : allowed
+    Actual   : allowed (0 rows)
+    Result   : PASS
+    Why      : readable via university.*; 0 rows: the professor is not a student
+
+[3/6] Read student contact details
+    User     : smith_professor (role professor_role)
+    SQL      : SELECT student_id, first_name, last_name, email FROM students
+    Expected : allowed
+    Actual   : allowed (5 rows)
+    Result   : PASS
+    Why      : GRANT SELECT ON university.* TO professor_role
+
+[4/6] Read ALL grades
+    User     : smith_professor (role professor_role)
+    SQL      : SELECT grade_id, student_id, course_id, grade FROM grades
+    Expected : allowed
+    Actual   : allowed (7 rows)
+    Result   : PASS
+    Why      : GRANT SELECT ON university.* TO professor_role
+
+[5/6] Change a grade
+    User     : smith_professor (role professor_role)
+    SQL      : UPDATE grades SET grade = %s WHERE grade_id = %s
+    Expected : allowed
+    Actual   : allowed
+    Result   : PASS
+    Why      : GRANT UPDATE (grade) ON grades: column-level privilege
+
+[6/6] Read financial records (IBANs)
+    User     : smith_professor (role professor_role)
+    SQL      : SELECT student_id, tuition_due, amount_paid, bank_iban FROM financial_records
+    Expected : denied (error 1142)
+    Actual   : denied (error 1142)
+    MariaDB  : SELECT command denied to user 'smith_professor'@'172.18.0.1' for table `university`.`financial_records`
+    Result   : PASS
+    Why      : DENY SELECT ON financial_records TO professor_role beats the broad GRANT
+
+==============================================================================
+ ROLE: finance   (MariaDB account: jones_finance)
+==============================================================================
+Logged in as : jones_finance@%   (active role: finance_role)
+TLS          : TLSv1.3  TLS_AES_256_GCM_SHA384  (server certificate verified against certs/ca.pem)
+
+[1/6] Read the course list
+    User     : jones_finance (role finance_role)
+    SQL      : SELECT code, title, credits, professor FROM courses
+    Expected : denied (error 1142)
+    Actual   : denied (error 1142)
+    MariaDB  : SELECT command denied to user 'jones_finance'@'172.18.0.1' for table `university`.`courses`
+    Result   : PASS
+    Why      : finance_role has no privilege on courses
+
+[2/6] Read my own grades (view)
+    User     : jones_finance (role finance_role)
+    SQL      : SELECT code, title, grade FROM my_grades
+    Expected : denied (error 1142)
+    Actual   : denied (error 1142)
+    MariaDB  : SELECT command denied to user 'jones_finance'@'172.18.0.1' for table `university`.`my_grades`
+    Result   : PASS
+    Why      : finance_role has no privilege on my_grades
+
+[3/6] Read student contact details
+    User     : jones_finance (role finance_role)
+    SQL      : SELECT student_id, first_name, last_name, email FROM students
+    Expected : allowed
+    Actual   : allowed (5 rows)
+    Result   : PASS
+    Why      : GRANT SELECT ON students TO finance_role
+
+[4/6] Read ALL grades
+    User     : jones_finance (role finance_role)
+    SQL      : SELECT grade_id, student_id, course_id, grade FROM grades
+    Expected : denied (error 1142)
+    Actual   : denied (error 1142)
+    MariaDB  : SELECT command denied to user 'jones_finance'@'172.18.0.1' for table `university`.`grades`
+    Result   : PASS
+    Why      : finance_role has no privilege on grades
+
+[5/6] Change a grade
+    User     : jones_finance (role finance_role)
+    SQL      : UPDATE grades SET grade = %s WHERE grade_id = %s
+    Expected : denied (error 1142)
+    Actual   : denied (error 1142)
+    MariaDB  : UPDATE command denied to user 'jones_finance'@'172.18.0.1' for table `university`.`grades`
+    Result   : PASS
+    Why      : no UPDATE privilege on grades
+
+[6/6] Read financial records (IBANs)
+    User     : jones_finance (role finance_role)
+    SQL      : SELECT student_id, tuition_due, amount_paid, bank_iban FROM financial_records
+    Expected : allowed
+    Actual   : allowed (5 rows)
+    Result   : PASS
+    Why      : GRANT SELECT, INSERT, UPDATE ON financial_records
+
+==============================================================================
+ ROLE: admin   (MariaDB account: uni_admin)
+==============================================================================
+Logged in as : uni_admin@%   (active role: admin_role)
+TLS          : TLSv1.3  TLS_AES_256_GCM_SHA384  (server certificate verified against certs/ca.pem)
+
+[1/6] Read the course list
+    User     : uni_admin (role admin_role)
+    SQL      : SELECT code, title, credits, professor FROM courses
+    Expected : allowed
+    Actual   : allowed (4 rows)
+    Result   : PASS
+    Why      : GRANT ALL ON university.* TO admin_role
+
+[2/6] Read my own grades (view)
+    User     : uni_admin (role admin_role)
+    SQL      : SELECT code, title, grade FROM my_grades
+    Expected : allowed
+    Actual   : allowed (0 rows)
+    Result   : PASS
+    Why      : ALL PRIVILEGES; 0 rows: the admin is not a student
+
+[3/6] Read student contact details
+    User     : uni_admin (role admin_role)
+    SQL      : SELECT student_id, first_name, last_name, email FROM students
+    Expected : allowed
+    Actual   : allowed (5 rows)
+    Result   : PASS
+    Why      : ALL PRIVILEGES
+
+[4/6] Read ALL grades
+    User     : uni_admin (role admin_role)
+    SQL      : SELECT grade_id, student_id, course_id, grade FROM grades
+    Expected : allowed
+    Actual   : allowed (7 rows)
+    Result   : PASS
+    Why      : ALL PRIVILEGES
+
+[5/6] Change a grade
+    User     : uni_admin (role admin_role)
+    SQL      : UPDATE grades SET grade = %s WHERE grade_id = %s
+    Expected : allowed
+    Actual   : allowed
+    Result   : PASS
+    Why      : ALL PRIVILEGES
+
+[6/6] Read financial records (IBANs)
+    User     : uni_admin (role admin_role)
+    SQL      : SELECT student_id, tuition_due, amount_paid, bank_iban FROM financial_records
+    Expected : allowed
+    Actual   : allowed (5 rows)
+    Result   : PASS
+    Why      : ALL PRIVILEGES
+
+Role demo: 24/24 actions behaved as expected.
+.venv/bin/python app/sqlrunner.py examples/
+
+==============================================================================
+ Example 1: roles and GRANT
+ (01_roles_and_grants.sql)
+==============================================================================
+Goal: Create a role, give it privileges once, give the role to a user.
+Goal: See that anything you did not GRANT is forbidden (default deny).
+  [setup] PASS DROP DATABASE IF EXISTS tutorial;
+  [setup] PASS DROP USER IF EXISTS tut_ann@'%';
+  [setup] PASS DROP ROLE IF EXISTS tut_reader;
+  [setup] PASS CREATE DATABASE tutorial;
+  [setup] PASS CREATE TABLE tutorial.projects (id INT PRIMARY KEY, name VARCHAR(40));
+  [setup] PASS CREATE TABLE tutorial.employees (id INT PRIMARY KEY, name VARCHAR(40), salary INT);
+  [setup] PASS INSERT INTO tutorial.projects VALUES (1, 'Apollo'), (2, 'Gemini');
+  [setup] PASS INSERT INTO tutorial.employees VALUES (1, 'Ann', 5200), (2, 'Bob', 4800);
+  [setup] PASS CREATE ROLE tut_reader;
+  [setup] PASS GRANT SELECT ON tutorial.projects TO tut_reader;
+  [setup] PASS CREATE USER tut_ann@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS GRANT tut_reader TO tut_ann@'%';
+  [setup] PASS SET DEFAULT ROLE tut_reader FOR tut_ann@'%';
+
+Step 1  user: dba (harness_8a94228b)  (active role: none)
+    SQL      SHOW GRANTS FOR tut_reader;
+    Expected contains SELECT
+    Actual   ok (2 rows)
+             | GRANT USAGE ON *.* TO `tut_reader`
+             | GRANT SELECT ON `tutorial`.`projects` TO `tut_reader`
+    Result   PASS
+    Why      SHOW GRANTS FOR a role lists exactly what the role can do.
+
+Step 2  user: tut_ann  (active role: tut_reader)
+    SQL      SELECT * FROM tutorial.projects;
+    Expected rows 2
+    Actual   ok (2 rows)
+             | 1  Apollo
+             | 2  Gemini
+    Result   PASS
+    Why      The role was granted SELECT on projects, so this works.
+
+Step 3  user: tut_ann  (active role: tut_reader)
+    SQL      SELECT * FROM tutorial.employees;
+    Expected error 1142 employees
+    Actual   error 1142: SELECT command denied to user 'tut_ann'@'172.18.0.1' for table `tutorial`.`employees`
+    Result   PASS
+    Why      Nothing was granted on employees. MariaDB's rule: what is not granted is forbidden.
+
+Step 4  user: tut_ann  (active role: tut_reader)
+    SQL      INSERT INTO tutorial.projects VALUES (3, 'Mercury');
+    Expected error 1142
+    Actual   error 1142: INSERT command denied to user 'tut_ann'@'172.18.0.1' for table `tutorial`.`projects`
+    Result   PASS
+    Why      Only SELECT was granted, so writing to projects fails as well.
+
+Step 5  user: dba (harness_8a94228b)  (active role: none)
+    SQL      GRANT INSERT ON tutorial.projects TO tut_reader;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 6  user: tut_ann  (active role: tut_reader)
+    SQL      INSERT INTO tutorial.projects VALUES (3, 'Mercury');
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      Role privileges are looked up on every statement, so no re-login is needed.
+
+  [cleanup] PASS 3 statements removed everything this script created
+-> 01_roles_and_grants.sql: 22 passed, 0 failed
+
+==============================================================================
+ Example 2: DENY and REVOKE DENY (MariaDB 13.1)
+ (02_deny.sql)
+==============================================================================
+Goal: Grant broadly, then subtract one table with DENY.
+Goal: See that a later GRANT cannot undo a DENY, and that only REVOKE DENY can.
+  [setup] PASS DROP DATABASE IF EXISTS tutorial;
+  [setup] PASS DROP USER IF EXISTS tut_ann@'%';
+  [setup] PASS DROP ROLE IF EXISTS tut_analyst;
+  [setup] PASS CREATE DATABASE tutorial;
+  [setup] PASS CREATE TABLE tutorial.projects (id INT PRIMARY KEY, name VARCHAR(40));
+  [setup] PASS CREATE TABLE tutorial.employees (id INT PRIMARY KEY, name VARCHAR(40), salary INT);
+  [setup] PASS INSERT INTO tutorial.projects VALUES (1, 'Apollo'), (2, 'Gemini');
+  [setup] PASS INSERT INTO tutorial.employees VALUES (1, 'Ann', 5200), (2, 'Bob', 4800);
+  [setup] PASS CREATE ROLE tut_analyst;
+  [setup] PASS CREATE USER tut_ann@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS GRANT tut_analyst TO tut_ann@'%';
+  [setup] PASS SET DEFAULT ROLE tut_analyst FOR tut_ann@'%';
+  [setup] PASS GRANT SELECT ON tutorial.* TO tut_analyst;
+
+Step 1  user: tut_ann  (active role: tut_analyst)
+    SQL      SELECT * FROM tutorial.employees;
+    Expected rows 2
+    Actual   ok (2 rows)
+             | 1  Ann  5200
+             | 2  Bob  4800
+    Result   PASS
+    Why      Before the DENY, the broad GRANT lets the analyst read every table.
+
+Step 2  user: dba (harness_8a94228b)  (active role: none)
+    SQL      DENY SELECT ON tutorial.employees TO tut_analyst;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 3  user: dba (harness_8a94228b)  (active role: none)
+    SQL      SHOW GRANTS FOR tut_analyst;
+    Expected contains DENY SELECT
+    Actual   ok (3 rows)
+             | GRANT USAGE ON *.* TO `tut_analyst`
+             | GRANT SELECT ON `tutorial`.* TO `tut_analyst`
+             | DENY SELECT ON `tutorial`.`employees` TO `tut_analyst`
+    Result   PASS
+    Why      DENY shows up as its own line in SHOW GRANTS (visible to accounts that can read the mysql database).
+
+Step 4  user: tut_ann  (active role: tut_analyst)
+    SQL      SELECT * FROM tutorial.employees;
+    Expected error 1142 employees
+    Actual   error 1142: SELECT command denied to user 'tut_ann'@'172.18.0.1' for table `tutorial`.`employees`
+    Result   PASS
+    Why      Error 1142 = "command denied for table". The GRANT on tutorial.* is still there, but DENY wins.
+
+Step 5  user: tut_ann  (active role: tut_analyst)
+    SQL      SELECT * FROM tutorial.projects;
+    Expected rows 2
+    Actual   ok (2 rows)
+             | 1  Apollo
+             | 2  Gemini
+    Result   PASS
+    Why      The DENY only names SELECT on employees: other tables are unaffected.
+
+Step 6  user: tut_ann  (active role: tut_analyst)
+    SQL      SHOW TABLES FROM tutorial;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | projects
+    Result   PASS
+    Why      A denied table disappears from SHOW TABLES: the user cannot even see it exists.
+
+Step 7  user: dba (harness_8a94228b)  (active role: none)
+    SQL      GRANT SELECT ON tutorial.employees TO tut_analyst;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 8  user: tut_ann  (active role: tut_analyst)
+    SQL      SELECT * FROM tutorial.employees;
+    Expected error 1142 employees
+    Actual   error 1142: SELECT command denied to user 'tut_ann'@'172.18.0.1' for table `tutorial`.`employees`
+    Result   PASS
+    Why      A DENY beats every GRANT, at every level, whatever order they were issued in.
+
+Step 9  user: dba (harness_8a94228b)  (active role: none)
+    SQL      REVOKE SELECT ON tutorial.employees FROM tut_analyst;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 10  user: dba (harness_8a94228b)  (active role: none)
+    SQL      REVOKE DENY SELECT ON tutorial.employees FROM tut_analyst;
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      Plain REVOKE removed only the explicit GRANT. The DENY needs REVOKE DENY, at exactly the same level (table).
+
+Step 11  user: tut_ann  (active role: tut_analyst)
+    SQL      SELECT * FROM tutorial.employees;
+    Expected rows 2
+    Actual   ok (2 rows)
+             | 1  Ann  5200
+             | 2  Bob  4800
+    Result   PASS
+    Why      Both the explicit table GRANT and the DENY are gone, but the broad GRANT on tutorial.* still applies.
+
+  [cleanup] PASS 3 statements removed everything this script created
+-> 02_deny.sql: 27 passed, 0 failed
+
+==============================================================================
+ Example 3: roles granted to roles (inheritance)
+ (03_role_inheritance.sql)
+==============================================================================
+Goal: Build a hierarchy: editor includes everything reader can do.
+Goal: See that only ONE role is active at a time, and what SET ROLE does.
+  [setup] PASS DROP DATABASE IF EXISTS tutorial;
+  [setup] PASS DROP USER IF EXISTS tut_ann@'%';
+  [setup] PASS DROP ROLE IF EXISTS tut_reader;
+  [setup] PASS DROP ROLE IF EXISTS tut_editor;
+  [setup] PASS CREATE DATABASE tutorial;
+  [setup] PASS CREATE TABLE tutorial.projects (id INT PRIMARY KEY, name VARCHAR(40));
+  [setup] PASS INSERT INTO tutorial.projects VALUES (1, 'Apollo');
+  [setup] PASS CREATE ROLE tut_reader;
+  [setup] PASS CREATE ROLE tut_editor;
+  [setup] PASS GRANT SELECT ON tutorial.projects TO tut_reader;
+  [setup] PASS GRANT tut_reader TO tut_editor;
+  [setup] PASS GRANT INSERT, UPDATE ON tutorial.projects TO tut_editor;
+  [setup] PASS CREATE USER tut_ann@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS GRANT tut_editor TO tut_ann@'%';
+
+Step 1  user: tut_ann  (active role: none)
+    SQL      SELECT * FROM tutorial.projects;
+    Expected error 1142
+    Actual   error 1142: SELECT command denied to user 'tut_ann'@'172.18.0.1' for table `tutorial`.`projects`
+    Result   PASS
+    Why      No default role was set, so no role is active yet: Ann can do nothing.
+
+Step 2  user: tut_ann  (active role: tut_editor)
+    SQL      SET ROLE tut_editor;
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      Roles must be activated with SET ROLE (or made default with SET DEFAULT ROLE).
+
+Step 3  user: tut_ann  (active role: tut_editor)
+    SQL      SELECT * FROM tutorial.projects;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  Apollo
+    Result   PASS
+    Why      SELECT was never granted to tut_editor directly. It is inherited from tut_reader.
+
+Step 4  user: tut_ann  (active role: tut_editor)
+    SQL      INSERT INTO tutorial.projects VALUES (2, 'Gemini');
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      INSERT was granted to tut_editor itself.
+
+Step 5  user: tut_ann  (active role: none)
+    SQL      SET ROLE NONE;
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      SET ROLE NONE switches every role off: all inherited privileges vanish together.
+
+Step 6  user: tut_ann  (active role: none)
+    SQL      SELECT * FROM tutorial.projects;
+    Expected error 1142
+    Actual   error 1142: SELECT command denied to user 'tut_ann'@'172.18.0.1' for table `tutorial`.`projects`
+    Result   PASS
+
+Step 7  user: tut_ann  (active role: none)
+    SQL      SET ROLE tut_reader;
+    Expected error 1959
+    Actual   error 1959: User `tut_ann`@`%` has not been granted role `tut_reader`
+    Result   PASS
+    Why      Ann was never granted tut_reader directly, so she cannot activate it: roles are only usable if granted.
+
+  [cleanup] PASS 4 statements removed everything this script created
+-> 03_role_inheritance.sql: 25 passed, 0 failed
+
+==============================================================================
+ Example 4: column-level GRANT and DENY
+ (04_column_privileges.sql)
+==============================================================================
+Goal: Let a user read some columns of a table but not others.
+Goal: Combine a table-wide GRANT with a column DENY, and undo it.
+  [setup] PASS DROP DATABASE IF EXISTS tutorial;
+  [setup] PASS DROP USER IF EXISTS tut_ann@'%';
+  [setup] PASS DROP USER IF EXISTS tut_bob@'%';
+  [setup] PASS CREATE DATABASE tutorial;
+  [setup] PASS CREATE TABLE tutorial.employees (id INT PRIMARY KEY, name VARCHAR(40), salary INT);
+  [setup] PASS INSERT INTO tutorial.employees VALUES (1, 'Ann', 5200), (2, 'Bob', 4800);
+  [setup] PASS CREATE USER tut_ann@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS CREATE USER tut_bob@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS GRANT SELECT (id, name) ON tutorial.employees TO tut_ann@'%';
+  [setup] PASS GRANT SELECT ON tutorial.employees TO tut_bob@'%';
+  [setup] PASS DENY SELECT (salary) ON tutorial.employees TO tut_bob@'%';
+
+Step 1  user: tut_ann  (active role: none)
+    SQL      SELECT id, name FROM tutorial.employees;
+    Expected rows 2
+    Actual   ok (2 rows)
+             | 1  Ann
+             | 2  Bob
+    Result   PASS
+
+Step 2  user: tut_ann  (active role: none)
+    SQL      SELECT * FROM tutorial.employees;
+    Expected error 1142 employees
+    Actual   error 1142: SELECT command denied to user 'tut_ann'@'172.18.0.1' for table `tutorial`.`employees`
+    Result   PASS
+    Why      SELECT * needs every column. Ann only holds two, so MariaDB reports a table-level refusal (error 1142).
+
+Step 3  user: tut_ann  (active role: none)
+    SQL      SELECT name FROM tutorial.employees WHERE salary > 5000;
+    Expected error 1143 salary
+    Actual   error 1143: SELECT command denied to user 'tut_ann'@'172.18.0.1' for column 'salary' in table 'employees'
+    Result   PASS
+    Why      Error 1143 = "command denied for COLUMN". Filtering on a forbidden column also reads it, so you cannot guess salaries with WHERE.
+
+Step 4  user: tut_bob  (active role: none)
+    SQL      SELECT * FROM tutorial.employees;
+    Expected error 1143 salary
+    Actual   error 1143: SELECT command denied to user 'tut_bob'@'172.18.0.1' for column 'salary' in table 'employees'
+    Result   PASS
+    Why      Bob has the table-wide GRANT, but the column DENY still removes salary.
+
+Step 5  user: tut_bob  (active role: none)
+    SQL      SELECT id, name FROM tutorial.employees;
+    Expected rows 2
+    Actual   ok (2 rows)
+             | 1  Ann
+             | 2  Bob
+    Result   PASS
+
+Step 6  user: tut_bob  (active role: none)
+    SQL      SHOW COLUMNS FROM tutorial.employees;
+    Expected rows 2
+    Actual   ok (2 rows)
+             | id    int(11)      NO   PRI  NULL
+             | name  varchar(40)  YES       NULL
+    Result   PASS
+    Why      The denied column is also hidden from SHOW COLUMNS (id and name remain).
+
+Step 7  user: dba (harness_8a94228b)  (active role: none)
+    SQL      REVOKE DENY SELECT (salary) ON tutorial.employees FROM tut_bob@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 8  user: tut_bob  (active role: none)
+    SQL      SELECT * FROM tutorial.employees;
+    Expected rows 2
+    Actual   ok (2 rows)
+             | 1  Ann  5200
+             | 2  Bob  4800
+    Result   PASS
+
+  [cleanup] PASS 3 statements removed everything this script created
+-> 04_column_privileges.sql: 22 passed, 0 failed
+
+==============================================================================
+ Example 5: ED25519 authentication and failed logins
+ (05_ed25519_authentication.sql)
+==============================================================================
+Goal: Create an account that authenticates with ED25519 instead of a stored password hash.
+Goal: See the different ways a login can fail, and which error code each produces.
+  [setup] PASS DROP USER IF EXISTS tut_ann@'%';
+  [setup] PASS CREATE USER tut_ann@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+
+Step 1  user: dba (harness_8a94228b)  (active role: none)
+    SQL      SELECT user, plugin FROM mysql.user WHERE user = 'tut_ann';
+    Expected contains ed25519
+    Actual   ok (1 rows)
+             | tut_ann  ed25519
+    Result   PASS
+    Why      MariaDB stored an ed25519 PUBLIC key, not a password hash. We print the plugin name only (never the stored value).
+
+Step 2  user: tut_ann  (active role: none)
+    SQL      log in as tut_ann
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      The client proves it knows the password by signing a server challenge; the password is never sent.
+
+Step 3  user: tut_ann  (active role: none)
+    SQL      log in as tut_ann with a WRONG password
+    Expected error 1045
+    Actual   error 1045: Access denied for user 'tut_ann'@'172.18.0.1' (using password: YES)
+    Result   PASS
+    Why      Wrong password: error 1045 and nothing else. No query can run.
+
+Step 4  user: nobody_here  (active role: none)
+    SQL      log in as nobody_here with a WRONG password
+    Expected error 1045
+    Actual   error 1045: Access denied for user 'nobody_here'@'172.18.0.1' (using password: YES)
+    Result   PASS
+    Why      An account that does not exist gives the SAME error 1045, so an attacker cannot tell which accounts exist.
+
+Step 5  user: dba (harness_8a94228b)  (active role: none)
+    SQL      ALTER USER tut_ann@'%' ACCOUNT LOCK;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 6  user: tut_ann  (active role: none)
+    SQL      log in as tut_ann
+    Expected error 4151
+    Actual   error 4151: Access denied, this account is locked
+    Result   PASS
+    Why      Even the correct password fails while the account is locked: error 4151.
+
+Step 7  user: dba (harness_8a94228b)  (active role: none)
+    SQL      ALTER USER tut_ann@'%' ACCOUNT UNLOCK;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 8  user: dba (harness_8a94228b)  (active role: none)
+    SQL      ALTER USER tut_ann@'%' PASSWORD EXPIRE;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 9  user: tut_ann  (active role: none)
+    SQL      SELECT 1;
+    Expected error 1820
+    Actual   error 1820: You must SET PASSWORD before executing this statement
+    Result   PASS
+    Why      With an expired password the login succeeds but every statement fails with 1820 until the password is changed.
+
+  [cleanup] PASS 1 statements removed everything this script created
+-> 05_ed25519_authentication.sql: 12 passed, 0 failed
+
+TOTAL: 108 steps passed, 0 failed
+.venv/bin/python app/sqlrunner.py experiments/
+
+==============================================================================
+ Experiment 1: GRANT and DENY conflicts
+ (01_grant_deny_conflicts.sql)
+==============================================================================
+Goal: Find out which wins when GRANT and DENY disagree: at the same level, at different levels, and in either order.
+Goal: Check that a DENY only removes the privilege it names.
+  [setup] PASS DROP DATABASE IF EXISTS exp_lab;
+  [setup] PASS DROP USER IF EXISTS exp_u@'%';
+  [setup] PASS DROP ROLE IF EXISTS exp_r;
+  [setup] PASS CREATE DATABASE exp_lab;
+  [setup] PASS CREATE TABLE exp_lab.t1 (id INT PRIMARY KEY, pub VARCHAR(20), secret VARCHAR(20));
+  [setup] PASS CREATE TABLE exp_lab.t2 (id INT PRIMARY KEY, v VARCHAR(20));
+  [setup] PASS INSERT INTO exp_lab.t1 VALUES (1, 'public-1', 'secret-1');
+  [setup] PASS INSERT INTO exp_lab.t2 VALUES (1, 'value-1');
+  [setup] PASS CREATE ROLE exp_r;
+  [setup] PASS CREATE USER exp_u@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS GRANT exp_r TO exp_u@'%';
+  [setup] PASS SET DEFAULT ROLE exp_r FOR exp_u@'%';
+  [setup] PASS GRANT SELECT ON exp_lab.* TO exp_r;
+
+Step 1  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY SELECT ON exp_lab.t1 TO exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 2  user: exp_u  (active role: exp_r)
+    SQL      SELECT * FROM exp_lab.t1;
+    Expected error 1142 t1
+    Actual   error 1142: SELECT command denied to user 'exp_u'@'172.18.0.1' for table `exp_lab`.`t1`
+    Result   PASS
+    Why      Case A: GRANT on the whole database + DENY on t1. The DENY is more specific AND stronger.
+
+Step 3  user: exp_u  (active role: exp_r)
+    SQL      SELECT * FROM exp_lab.t2;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  value-1
+    Result   PASS
+    Why      The other table is still covered by the database-level GRANT.
+  [setup] PASS REVOKE ALL PRIVILEGES, GRANT OPTION FROM exp_r;
+
+Step 4  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY SELECT ON exp_lab.t2 TO exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 5  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      GRANT SELECT ON exp_lab.t2 TO exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 6  user: exp_u  (active role: exp_r)
+    SQL      SELECT * FROM exp_lab.t2;
+    Expected error 1142 t2
+    Actual   error 1142: SELECT command denied to user 'exp_u'@'172.18.0.1' for table `exp_lab`.`t2`
+    Result   PASS
+    Why      Case B: DENY first, GRANT afterwards. Still denied: the order of the two statements is irrelevant.
+  [setup] PASS REVOKE ALL PRIVILEGES, GRANT OPTION FROM exp_r;
+
+Step 7  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      GRANT SELECT ON exp_lab.t1 TO exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 8  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY SELECT ON exp_lab.* TO exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 9  user: exp_u  (active role: exp_r)
+    SQL      SELECT * FROM exp_lab.t1;
+    Expected error 1142 t1
+    Actual   error 1142: SELECT command denied to user 'exp_u'@'172.18.0.1' for table `exp_lab`.`t1`
+    Result   PASS
+    Why      Case C: the table-level GRANT on t1 is more specific, yet the database-level DENY still wins. Denies propagate downward.
+  [setup] PASS REVOKE ALL PRIVILEGES, GRANT OPTION FROM exp_r;
+
+Step 10  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      GRANT SELECT (pub) ON exp_lab.t1 TO exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 11  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY SELECT ON exp_lab.t1 TO exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 12  user: exp_u  (active role: exp_r)
+    SQL      SELECT pub FROM exp_lab.t1;
+    Expected error 1142 t1
+    Actual   error 1142: SELECT command denied to user 'exp_u'@'172.18.0.1' for table `exp_lab`.`t1`
+    Result   PASS
+    Why      Case D: even the narrowest GRANT (one column) cannot survive a table-level DENY (reported as a table-level refusal, 1142).
+  [setup] PASS REVOKE ALL PRIVILEGES, GRANT OPTION FROM exp_r;
+
+Step 13  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      GRANT SELECT, INSERT ON exp_lab.t2 TO exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 14  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY INSERT ON exp_lab.t2 TO exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 15  user: exp_u  (active role: exp_r)
+    SQL      SELECT * FROM exp_lab.t2;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  value-1
+    Result   PASS
+    Why      Case E: SELECT was granted and never denied, so reading still works.
+
+Step 16  user: exp_u  (active role: exp_r)
+    SQL      INSERT INTO exp_lab.t2 VALUES (2, 'value-2');
+    Expected error 1142 t2
+    Actual   error 1142: INSERT command denied to user 'exp_u'@'172.18.0.1' for table `exp_lab`.`t2`
+    Result   PASS
+    Why      INSERT was granted and denied: the DENY wins for exactly this privilege.
+
+  [cleanup] PASS 3 statements removed everything this script created
+Security implication: A DENY is a hard ceiling: broad GRANTs, later GRANTs and narrower GRANTs cannot raise a user above it.
+Security implication: The flip side: an accidental DENY cannot be fixed by granting more. Only REVOKE DENY (at the same level) repairs it.
+-> 01_grant_deny_conflicts.sql: 36 passed, 0 failed
+
+==============================================================================
+ Experiment 2: privileges and denies through several roles
+ (02_multi_role_inheritance.sql)
+==============================================================================
+Goal: Find a MariaDB 13.1.2 limitation: a DENY on an inherited role is not enforced until the role graph is rebuilt.
+Goal: See how privileges flow down a chain of roles, and how a DENY deep in the role graph interacts with a GRANT elsewhere.
+  [setup] PASS DROP DATABASE IF EXISTS exp_lab;
+  [setup] PASS DROP USER IF EXISTS exp_u@'%';
+  [setup] PASS DROP ROLE IF EXISTS exp_team;
+  [setup] PASS DROP ROLE IF EXISTS exp_readers;
+  [setup] PASS DROP ROLE IF EXISTS exp_guard;
+  [setup] PASS DROP ROLE IF EXISTS exp_audit_block;
+  [setup] PASS DROP ROLE IF EXISTS exp_plain;
+  [setup] PASS CREATE DATABASE exp_lab;
+  [setup] PASS CREATE TABLE exp_lab.t_data (id INT PRIMARY KEY, v VARCHAR(20));
+  [setup] PASS CREATE TABLE exp_lab.t_audit (id INT PRIMARY KEY, v VARCHAR(20));
+  [setup] PASS INSERT INTO exp_lab.t_data VALUES (1, 'data');
+  [setup] PASS INSERT INTO exp_lab.t_audit VALUES (1, 'audit');
+  [setup] PASS CREATE ROLE exp_team;
+  [setup] PASS CREATE ROLE exp_readers;
+  [setup] PASS CREATE ROLE exp_guard;
+  [setup] PASS CREATE ROLE exp_audit_block;
+  [setup] PASS CREATE ROLE exp_plain;
+  [setup] PASS GRANT SELECT ON exp_lab.* TO exp_readers;
+  [setup] PASS GRANT SELECT ON exp_lab.t_audit TO exp_plain;
+  [setup] PASS GRANT exp_readers TO exp_team;
+  [setup] PASS GRANT exp_guard TO exp_team;
+  [setup] PASS GRANT exp_audit_block TO exp_guard;
+  [setup] PASS CREATE USER exp_u@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS GRANT exp_team TO exp_u@'%';
+  [setup] PASS GRANT exp_plain TO exp_u@'%';
+
+Step 1  user: exp_u  (active role: exp_team)
+    SQL      SET ROLE exp_team;
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      Part 1: GRANT is inherited two levels down (exp_u -> exp_team -> exp_readers). Activate the top role.
+
+Step 2  user: exp_u  (active role: exp_team)
+    SQL      SELECT * FROM exp_lab.t_data;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  data
+    Result   PASS
+
+Step 3  user: exp_u  (active role: exp_team)
+    SQL      SELECT * FROM exp_lab.t_audit;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  audit
+    Result   PASS
+    Why      No DENY exists yet: t_audit is readable through the inherited GRANT.
+
+Step 4  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY SELECT ON exp_lab.t_audit TO exp_audit_block;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 5  user: exp_u  (active role: exp_team)
+    SQL      SELECT * FROM exp_lab.t_audit;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  audit
+    Result   PASS
+    Why      Part 2 - A FINDING (MariaDB 13.1.2): the DENY exists but is NOT enforced yet. A DENY on a role that is inherited by another role only takes effect after the server rebuilds its role graph. Until then the user is still allowed (fail-open).
+
+Step 6  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      FLUSH PRIVILEGES;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 7  user: exp_u  (active role: exp_team)
+    SQL      SELECT * FROM exp_lab.t_audit;
+    Expected error 1142 t_audit
+    Actual   error 1142: SELECT command denied to user 'exp_u'@'172.18.0.1' for table `exp_lab`.`t_audit`
+    Result   PASS
+    Why      Part 3: now the DENY (in exp_audit_block, a role of a role of a role) beats the GRANT that arrives through a different branch (exp_readers).
+
+Step 8  user: exp_u  (active role: exp_team)
+    SQL      SELECT * FROM exp_lab.t_data;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  data
+    Result   PASS
+
+Step 9  user: exp_u  (active role: exp_plain)
+    SQL      SET ROLE exp_plain;
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      Part 4: exp_plain is a different role that GRANTs t_audit directly. Switch to it: its graph does not contain the DENY, so access works.
+
+Step 10  user: exp_u  (active role: exp_plain)
+    SQL      SELECT * FROM exp_lab.t_audit;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  audit
+    Result   PASS
+
+Step 11  user: exp_u  (active role: exp_plain)
+    SQL      SELECT * FROM exp_lab.t_data;
+    Expected error 1142 t_data
+    Actual   error 1142: SELECT command denied to user 'exp_u'@'172.18.0.1' for table `exp_lab`.`t_data`
+    Result   PASS
+    Why      A DENY only applies to the roles that are in the ACTIVE role's graph. Cutting a role out of the graph (or never activating it) also cuts out its DENYs.
+
+  [cleanup] PASS 7 statements removed everything this script created
+Security implication: Roles compose: a DENY anywhere below the active role beats a GRANT anywhere else below it.
+Security implication: After DENYing a role that other roles inherit, run FLUSH PRIVILEGES and TEST. A DENY on the account itself, or on the role the user activates, is enforced immediately (experiment 8 shows both).
+Security implication: MariaDB activates one role at a time (SET ROLE), so a DENY is only as strong as the role graph it belongs to. See experiment 8.
+-> 02_multi_role_inheritance.sql: 43 passed, 0 failed
+
+==============================================================================
+ Experiment 3: column-level DENY - what it blocks, and what it leaks
+ (03_column_level_deny.sql)
+==============================================================================
+Goal: Deny one column of an otherwise readable table and test every way of reaching that column.
+Goal: Check what an unprivileged user can still learn about the denied column (metadata, row count).
+  [setup] PASS DROP DATABASE IF EXISTS exp_lab;
+  [setup] PASS DROP USER IF EXISTS exp_u@'%';
+  [setup] PASS CREATE DATABASE exp_lab;
+  [setup] PASS CREATE TABLE exp_lab.t (id INT PRIMARY KEY, pub VARCHAR(20), secret VARCHAR(20));
+  [setup] PASS INSERT INTO exp_lab.t VALUES (1, 'public-1', 'secret-1');
+  [setup] PASS CREATE USER exp_u@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS GRANT SELECT, INSERT, UPDATE ON exp_lab.t TO exp_u@'%';
+  [setup] PASS DENY SELECT (secret) ON exp_lab.t TO exp_u@'%';
+  [setup] PASS DENY UPDATE (secret) ON exp_lab.t TO exp_u@'%';
+
+Step 1  user: exp_u  (active role: none)
+    SQL      SELECT id, pub FROM exp_lab.t;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  public-1
+    Result   PASS
+    Why      Control: the non-secret columns are readable.
+
+Step 2  user: exp_u  (active role: none)
+    SQL      SELECT * FROM exp_lab.t;
+    Expected error 1143 secret
+    Actual   error 1143: SELECT command denied to user 'exp_u'@'172.18.0.1' for column 'secret' in table 't'
+    Result   PASS
+    Why      SELECT * expands to include "secret", so the whole statement is refused (1143 = column level).
+
+Step 3  user: exp_u  (active role: none)
+    SQL      SELECT secret FROM exp_lab.t;
+    Expected error 1143 secret
+    Actual   error 1143: SELECT command denied to user 'exp_u'@'172.18.0.1' for column 'secret' in table 't'
+    Result   PASS
+
+Step 4  user: exp_u  (active role: none)
+    SQL      SELECT id FROM exp_lab.t WHERE secret = 'secret-1';
+    Expected error 1143 secret
+    Actual   error 1143: SELECT command denied to user 'exp_u'@'172.18.0.1' for column 'secret' in table 't'
+    Result   PASS
+    Why      Using the column only in a WHERE clause is still a read of it. Otherwise the answer (row returned or not) would leak the value one guess at a time.
+
+Step 5  user: exp_u  (active role: none)
+    SQL      SELECT id FROM exp_lab.t ORDER BY secret;
+    Expected error 1143 secret
+    Actual   error 1143: SELECT command denied to user 'exp_u'@'172.18.0.1' for column 'secret' in table 't'
+    Result   PASS
+
+Step 6  user: exp_u  (active role: none)
+    SQL      SELECT MAX(secret) FROM exp_lab.t;
+    Expected error 1143 secret
+    Actual   error 1143: SELECT command denied to user 'exp_u'@'172.18.0.1' for column 'secret' in table 't'
+    Result   PASS
+    Why      LIMIT-ing the leak via aggregates does not work either.
+
+Step 7  user: exp_u  (active role: none)
+    SQL      UPDATE exp_lab.t SET secret = 'overwritten' WHERE id = 1;
+    Expected error 1143 secret
+    Actual   error 1143: UPDATE command denied to user 'exp_u'@'172.18.0.1' for column 'secret' in table 't'
+    Result   PASS
+    Why      Writing: UPDATE of the denied column is refused ...
+
+Step 8  user: exp_u  (active role: none)
+    SQL      UPDATE exp_lab.t SET pub = 'public-1b' WHERE id = 1;
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      ... while UPDATE of other columns works: a DENY removes only what it names.
+
+Step 9  user: exp_u  (active role: none)
+    SQL      INSERT INTO exp_lab.t (id, pub, secret) VALUES (2, 'public-2', 'planted-by-exp_u');
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      INSERT was granted and only UPDATE(secret)/SELECT(secret) were denied, so the user can still WRITE a value into the column at insert time. A write-only column is not the same as a protected column!
+
+Step 10  user: exp_u  (active role: none)
+    SQL      SHOW COLUMNS FROM exp_lab.t;
+    Expected contains secret
+    Actual   ok (3 rows)
+             | id      int(11)      NO   PRI  NULL
+             | pub     varchar(20)  YES       NULL
+             | secret  varchar(20)  YES       NULL
+    Result   PASS
+    Why      Metadata, part 1: the column is STILL listed. SHOW COLUMNS shows every column on which you hold ANY privilege, and INSERT on it was never denied.
+
+Step 11  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY INSERT (secret) ON exp_lab.t TO exp_u@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 12  user: exp_u  (active role: none)
+    SQL      SHOW COLUMNS FROM exp_lab.t;
+    Expected excludes secret
+    Actual   ok (2 rows)
+             | id   int(11)      NO   PRI  NULL
+             | pub  varchar(20)  YES       NULL
+    Result   PASS
+    Why      Metadata, part 2: with SELECT, UPDATE and INSERT on the column all denied, no privilege is left and the column disappears from SHOW COLUMNS ...
+
+Step 13  user: exp_u  (active role: none)
+    SQL      SELECT column_name FROM information_schema.columns WHERE table_schema = 'exp_lab' AND table_name = 't';
+    Expected excludes secret
+    Actual   ok (2 rows)
+             | id
+             | pub
+    Result   PASS
+
+Step 14  user: exp_u  (active role: none)
+    SQL      INSERT INTO exp_lab.t (id, pub, secret) VALUES (3, 'public-3', 'planted-again');
+    Expected error 1143 secret
+    Actual   error 1143: INSERT command denied to user 'exp_u'@'172.18.0.1' for column 'secret' in table 't'
+    Result   PASS
+    Why      ... and the planted-value trick no longer works.
+
+Step 15  user: exp_u  (active role: none)
+    SQL      SHOW CREATE TABLE exp_lab.t;
+    Expected contains secret
+    Actual   ok (1 rows)
+             | t  CREATE TABLE `t` (
+  `id` int(11) NOT NULL,
+  `pub` varchar(20) DEFAULT NULL,
+  `secret` varchar(20) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+    Result   PASS
+    Why      LIMITATION: SHOW CREATE TABLE still prints the complete definition, including the denied column's name and type (documented by MariaDB).
+
+Step 16  user: exp_u  (active role: none)
+    SQL      SELECT COUNT(*) FROM exp_lab.t;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 2
+    Result   PASS
+    Why      Counting rows needs no column, so it is allowed: the existence and number of rows is not protected by a column DENY.
+
+  [cleanup] PASS 2 statements removed everything this script created
+Security implication: A column DENY blocks reading the column in any clause (SELECT list, WHERE, ORDER BY, aggregates).
+Security implication: It does not hide the column's name (SHOW CREATE TABLE) or the table's row count, and the column stays listed - and writable at INSERT - until every privilege on it is denied.
+-> 03_column_level_deny.sql: 27 passed, 0 failed
+
+==============================================================================
+ Experiment 4: REVOKE DENY - exact levels, stale denies and what really removes a DENY
+ (04_revoke_deny.sql)
+==============================================================================
+Goal: Find out which statements remove a DENY and which only look as if they should.
+Goal: Check what happens to a DENY when the database it points to is dropped.
+  [setup] PASS DROP DATABASE IF EXISTS exp_lab;
+  [setup] PASS DROP USER IF EXISTS exp_u@'%';
+  [setup] PASS DROP ROLE IF EXISTS exp_r;
+  [setup] PASS CREATE DATABASE exp_lab;
+  [setup] PASS CREATE TABLE exp_lab.t (id INT PRIMARY KEY, pub VARCHAR(20));
+  [setup] PASS INSERT INTO exp_lab.t VALUES (1, 'x');
+  [setup] PASS CREATE ROLE exp_r;
+  [setup] PASS CREATE USER exp_u@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS GRANT exp_r TO exp_u@'%';
+  [setup] PASS SET DEFAULT ROLE exp_r FOR exp_u@'%';
+  [setup] PASS GRANT SELECT ON exp_lab.t TO exp_r;
+  [setup] PASS DENY SELECT ON exp_lab.t TO exp_r;
+
+Step 1  user: exp_u  (active role: exp_r)
+    SQL      SELECT * FROM exp_lab.t;
+    Expected error 1142 t
+    Actual   error 1142: SELECT command denied to user 'exp_u'@'172.18.0.1' for table `exp_lab`.`t`
+    Result   PASS
+
+Step 2  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      REVOKE DENY SELECT ON exp_lab.* FROM exp_r;
+    Expected error 1141
+    Actual   error 1141: There is no such grant defined for user 'exp_r' on host ''
+    Result   PASS
+    Why      The DENY is on the TABLE. Revoking at database level finds nothing to revoke (error 1141).
+
+Step 3  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      REVOKE DENY SELECT (pub) ON exp_lab.t FROM exp_r;
+    Expected error 1147
+    Actual   error 1147: There is no such grant defined for user 'exp_r' on host '' on table 't'
+    Result   PASS
+    Why      Revoking at column level fails too (error 1147: no such grant on this table).
+
+Step 4  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      REVOKE DENY INSERT ON exp_lab.t FROM exp_r;
+    Expected error 1147
+    Actual   error 1147: There is no such grant defined for user 'exp_r' on host '' on table 't'
+    Result   PASS
+    Why      A different privilege type does not match either.
+
+Step 5  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      REVOKE SELECT ON exp_lab.t FROM exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 6  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SHOW GRANTS FOR exp_r;
+    Expected contains DENY SELECT ON `exp_lab`.`t`
+    Actual   ok (2 rows)
+             | GRANT USAGE ON *.* TO `exp_r`
+             | DENY SELECT ON `exp_lab`.`t` TO `exp_r`
+    Result   PASS
+    Why      The explicit GRANT is gone, but the DENY line is still in the role's grants.
+
+Step 7  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY SELECT (pub) ON exp_lab.t TO exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 8  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      REVOKE DENY SELECT ON exp_lab.t FROM exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 9  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SHOW GRANTS FOR exp_r;
+    Expected contains DENY SELECT (`pub`)
+    Actual   ok (2 rows)
+             | GRANT USAGE ON *.* TO `exp_r`
+             | DENY SELECT (`pub`) ON `exp_lab`.`t` TO `exp_r`
+    Result   PASS
+    Why      The table-level DENY is removed, the column-level one stays.
+
+Step 10  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY SELECT ON exp_lab.t TO exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 11  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      REVOKE ALL PRIVILEGES, GRANT OPTION FROM exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 12  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SHOW GRANTS FOR exp_r;
+    Expected excludes DENY
+    Actual   ok (1 rows)
+             | GRANT USAGE ON *.* TO `exp_r`
+    Result   PASS
+    Why      Everything is gone in one statement: the quickest (and the most dangerous) way to clear an account.
+  [setup] PASS GRANT SELECT ON exp_lab.* TO exp_r;
+
+Step 13  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY SELECT ON exp_lab.* TO exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 14  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DROP DATABASE exp_lab;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 15  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SHOW GRANTS FOR exp_r;
+    Expected contains DENY SELECT ON `exp_lab`.*
+    Actual   ok (3 rows)
+             | GRANT USAGE ON *.* TO `exp_r`
+             | GRANT SELECT ON `exp_lab`.* TO `exp_r`
+             | DENY SELECT ON `exp_lab`.* TO `exp_r`
+    Result   PASS
+    Why      LIMITATION: dropping the database does NOT remove its database-level DENY. It is still listed.
+  [setup] PASS CREATE DATABASE exp_lab;
+  [setup] PASS CREATE TABLE exp_lab.t (id INT PRIMARY KEY, pub VARCHAR(20));
+  [setup] PASS INSERT INTO exp_lab.t VALUES (1, 'x');
+  [setup] PASS GRANT SELECT ON exp_lab.* TO exp_r;
+
+Step 16  user: exp_u  (active role: exp_r)
+    SQL      SELECT * FROM exp_lab.t;
+    Expected error 1142 t
+    Actual   error 1142: SELECT command denied to user 'exp_u'@'172.18.0.1' for table `exp_lab`.`t`
+    Result   PASS
+    Why      The database was re-created and the role was granted SELECT again - but the old DENY silently applies to the NEW database with the same name.
+
+Step 17  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      REVOKE DENY SELECT ON exp_lab.* FROM exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 18  user: exp_u  (active role: exp_r)
+    SQL      SELECT * FROM exp_lab.t;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  x
+    Result   PASS
+
+  [cleanup] PASS 3 statements removed everything this script created
+Security implication: REVOKE DENY needs the exact level and privilege of the original DENY; always check the result with SHOW GRANTS.
+Security implication: Audit for stale DENYs after dropping and re-creating databases: they are not cleaned up automatically.
+-> 04_revoke_deny.sql: 38 passed, 0 failed
+
+==============================================================================
+ Experiment 5: privilege escalation attempts
+ (05_privilege_escalation.sql)
+==============================================================================
+Goal: Play an attacker who owns a low-privilege account (and one delegated administrator) and tries every common way to gain more.
+Goal: Record the exact error MariaDB returns for each attempt.
+  [setup] PASS DROP DATABASE IF EXISTS exp_lab;
+  [setup] PASS DROP USER IF EXISTS exp_low@'%';
+  [setup] PASS DROP USER IF EXISTS exp_dba@'%';
+  [setup] PASS DROP USER IF EXISTS exp_other@'%';
+  [setup] PASS DROP ROLE IF EXISTS exp_priv;
+  [setup] PASS CREATE DATABASE exp_lab;
+  [setup] PASS CREATE TABLE exp_lab.pub_t (id INT PRIMARY KEY, v VARCHAR(20));
+  [setup] PASS CREATE TABLE exp_lab.secret_t (id INT PRIMARY KEY, v VARCHAR(20));
+  [setup] PASS INSERT INTO exp_lab.pub_t VALUES (1, 'public');
+  [setup] PASS INSERT INTO exp_lab.secret_t VALUES (1, 'top-secret');
+  [setup] PASS CREATE ROLE exp_priv;
+  [setup] PASS GRANT SELECT ON exp_lab.* TO exp_priv;
+  [setup] PASS DENY SELECT ON exp_lab.secret_t TO exp_priv;
+  [setup] PASS CREATE USER exp_low@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS CREATE USER exp_dba@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS CREATE USER exp_other@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS GRANT SELECT, INSERT ON exp_lab.pub_t TO exp_low@'%';
+  [setup] PASS GRANT CREATE, CREATE VIEW ON exp_lab.* TO exp_low@'%';
+  [setup] PASS GRANT SELECT ON exp_lab.* TO exp_dba@'%' WITH GRANT OPTION;
+  [setup] PASS DENY SELECT ON exp_lab.secret_t TO exp_dba@'%';
+
+Step 1  user: exp_low  (active role: none)
+    SQL      SELECT * FROM exp_lab.secret_t;
+    Expected error 1142 secret_t
+    Actual   error 1142: SELECT command denied to user 'exp_low'@'172.18.0.1' for table `exp_lab`.`secret_t`
+    Result   PASS
+    Why      Baseline: the protected table is not readable.
+
+Step 2  user: exp_low  (active role: none)
+    SQL      SET ROLE exp_priv;
+    Expected error 1959
+    Actual   error 1959: Invalid role specification `exp_priv`
+    Result   PASS
+    Why      Attack 1: activate a role you were never granted. Error 1959: roles cannot be self-assigned.
+
+Step 3  user: exp_low  (active role: none)
+    SQL      GRANT SELECT ON exp_lab.secret_t TO exp_low@'%';
+    Expected error 1142
+    Actual   error 1142: SELECT, GRANT command denied to user 'exp_low'@'172.18.0.1' for table `exp_lab`.`secret_t`
+    Result   PASS
+    Why      Attack 2: grant yourself the privilege. You cannot grant what you do not hold.
+
+Step 4  user: exp_low  (active role: none)
+    SQL      GRANT SELECT ON exp_lab.pub_t TO PUBLIC;
+    Expected error 1142
+    Actual   error 1142: GRANT command denied to user 'exp_low'@'172.18.0.1' for table `exp_lab`.`pub_t`
+    Result   PASS
+    Why      Attack 3: grant to PUBLIC to open the door for everybody.
+
+Step 5  user: exp_low  (active role: none)
+    SQL      CREATE VIEW exp_lab.sneaky AS SELECT * FROM exp_lab.secret_t;
+    Expected error 1142 secret_t
+    Actual   error 1142: ANY command denied to user 'exp_low'@'%' for table `exp_lab`.`secret_t`
+    Result   PASS
+    Why      Attack 4: copy the protected data through a view you are allowed to create. A view needs SELECT on its base table at creation time.
+
+Step 6  user: exp_low  (active role: none)
+    SQL      INSERT INTO exp_lab.pub_t SELECT * FROM exp_lab.secret_t;
+    Expected error 1142 secret_t
+    Actual   error 1142: SELECT command denied to user 'exp_low'@'172.18.0.1' for table `exp_lab`.`secret_t`
+    Result   PASS
+    Why      Attack 5: copy it into a table you CAN read. The source table is checked as well.
+
+Step 7  user: exp_low  (active role: none)
+    SQL      CREATE USER evil@'%' IDENTIFIED BY 'x';
+    Expected error 1227
+    Actual   error 1227: Access denied; you need (at least one of) the CREATE USER privilege(s) for this operation
+    Result   PASS
+
+Step 8  user: exp_low  (active role: none)
+    SQL      UPDATE mysql.global_priv SET Priv = '{}' WHERE User = 'exp_low';
+    Expected error 1142 global_priv
+    Actual   error 1142: UPDATE command denied to user 'exp_low'@'172.18.0.1' for table `mysql`.`global_priv`
+    Result   PASS
+
+Step 9  user: exp_low  (active role: none)
+    SQL      SELECT * FROM mysql.user;
+    Expected error 1142 user
+    Actual   error 1142: SELECT command denied to user 'exp_low'@'172.18.0.1' for table `mysql`.`user`
+    Result   PASS
+
+Step 10  user: exp_low  (active role: none)
+    SQL      SET PASSWORD FOR root@localhost = PASSWORD('hacked');
+    Expected error 1044
+    Actual   error 1044: Access denied for user 'exp_low'@'%' to database 'mysql'
+    Result   PASS
+    Why      Attack 9: take over root by changing its password.
+
+Step 11  user: exp_low  (active role: none)
+    SQL      SELECT 'x' INTO OUTFILE '/tmp/exp_low_was_here';
+    Expected error 1227
+    Actual   error 1227: Access denied; you need (at least one of) the FILE privilege(s) for this operation
+    Result   PASS
+
+Step 12  user: exp_low  (active role: none)
+    SQL      SELECT LOAD_FILE('/etc/passwd');
+    Expected contains NULL
+    Actual   ok (1 rows)
+             | NULL
+    Result   PASS
+    Why      LOAD_FILE does not raise an error without the FILE privilege; it silently returns NULL.
+
+Step 13  user: exp_low  (active role: none)
+    SQL      CREATE FUNCTION evil RETURNS INT SONAME 'evil.so';
+    Expected error 1044
+    Actual   error 1044: Access denied for user 'exp_low'@'%' to database 'mysql'
+    Result   PASS
+    Why      Attack 12: load a shared library as a user-defined function (a classic route to code execution).
+
+Step 14  user: exp_low  (active role: none)
+    SQL      SET GLOBAL read_only = 0;
+    Expected error 1227
+    Actual   error 1227: Access denied; you need (at least one of) the READ_ONLY ADMIN privilege(s) for this operation
+    Result   PASS
+
+Step 15  user: exp_dba  (active role: none)
+    SQL      GRANT SELECT ON exp_lab.pub_t TO exp_other@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      Control: exp_dba may delegate what it holds. This works.
+
+Step 16  user: exp_dba  (active role: none)
+    SQL      GRANT SELECT ON exp_lab.secret_t TO exp_other@'%';
+    Expected error 1142 secret_t
+    Actual   error 1142: SELECT command denied to user 'exp_dba'@'172.18.0.1' for table `exp_lab`.`secret_t`
+    Result   PASS
+    Why      Attack 14: exp_dba is DENIED secret_t but has GRANT OPTION on the whole database. Can it hand the table to someone else?
+
+Step 17  user: exp_dba  (active role: none)
+    SQL      REVOKE DENY SELECT ON exp_lab.secret_t FROM exp_dba@'%';
+    Expected error 1142 secret_t
+    Actual   error 1142: SELECT command denied to user 'exp_dba'@'172.18.0.1' for table `exp_lab`.`secret_t`
+    Result   PASS
+    Why      Attack 15: remove its own DENY. Lifting a DENY requires holding the denied privilege.
+
+  [cleanup] PASS 5 statements removed everything this script created
+Security implication: No attempt succeeded, and every one failed with a different, specific error. The failures come from MariaDB's grant tables, not from application code.
+Security implication: A DENY also constrains delegated administrators: GRANT OPTION does not let them hand out, or unlock for themselves, a privilege they are denied.
+-> 05_privilege_escalation.sql: 42 passed, 0 failed
+
+==============================================================================
+ Experiment 6: unauthorized tables and columns in the real university database
+ (06_unauthorized_access.sql)
+==============================================================================
+Goal: Attack the production-like university database as each demo user, using every route to forbidden data that SQL offers.
+Goal: Confirm the application roles from sql/03_roles.sql hold under joins, subqueries, qualified names and other databases.
+
+Step 1  user: alice_student  (active role: student_role)
+    SQL      SELECT * FROM university.my_grades;
+    Expected rows 2
+    Actual   ok (2 rows)
+             | CS201  Databases              1.3
+             | CS105  Programming in Python  2.0
+    Result   PASS
+    Why      Control: the view she is allowed to use shows exactly her own 2 grades.
+
+Step 2  user: alice_student  (active role: student_role)
+    SQL      SELECT * FROM university.my_grades WHERE 1 = 1 OR code = 'x';
+    Expected rows 2
+    Actual   ok (2 rows)
+             | CS201  Databases              1.3
+             | CS105  Programming in Python  2.0
+    Result   PASS
+    Why      Trying to widen the view's filter with a tautology changes nothing: the filter is part of the view, not of her query.
+
+Step 3  user: alice_student  (active role: student_role)
+    SQL      SELECT * FROM university.grades;
+    Expected error 1142 grades
+    Actual   error 1142: SELECT command denied to user 'alice_student'@'172.18.0.1' for table `university`.`grades`
+    Result   PASS
+    Why      The base table is closed to her.
+
+Step 4  user: alice_student  (active role: student_role)
+    SQL      SELECT c.code, f.bank_iban FROM university.courses c, university.financial_records f;
+    Expected error 1142 financial_records
+    Actual   error 1142: SELECT command denied to user 'alice_student'@'172.18.0.1' for table `university`.`financial_records`
+    Result   PASS
+    Why      A join does not help: each table in the statement is checked.
+
+Step 5  user: alice_student  (active role: student_role)
+    SQL      SELECT (SELECT bank_iban FROM university.financial_records LIMIT 1) AS stolen;
+    Expected error 1142 financial_records
+    Actual   error 1142: SELECT command denied to user 'alice_student'@'172.18.0.1' for table `university`.`financial_records`
+    Result   PASS
+    Why      Neither does a scalar subquery.
+
+Step 6  user: alice_student  (active role: student_role)
+    SQL      SELECT * FROM mysql.user;
+    Expected error 1142 user
+    Actual   error 1142: SELECT command denied to user 'alice_student'@'172.18.0.1' for table `mysql`.`user`
+    Result   PASS
+    Why      The system schema is closed too.
+
+Step 7  user: alice_student  (active role: student_role)
+    SQL      SELECT table_name FROM information_schema.tables WHERE table_schema = 'university';
+    Expected excludes financial_records
+    Actual   ok (2 rows)
+             | courses
+             | my_grades
+    Result   PASS
+    Why      Metadata is filtered to what she may touch: she sees only courses and my_grades, not the other tables.
+
+Step 8  user: alice_student  (active role: student_role)
+    SQL      SHOW GRANTS FOR smith_professor@'%';
+    Expected error 1044
+    Actual   error 1044: Access denied for user 'alice_student'@'%' to database 'mysql'
+    Result   PASS
+    Why      She cannot inspect other accounts' grants.
+
+Step 9  user: smith_professor  (active role: professor_role)
+    SQL      SELECT s.last_name, g.grade FROM university.students s JOIN university.grades g ON g.student_id = s.student_id;
+    Expected rows 7
+    Actual   ok (7 rows)
+             | Meyer   1.3
+             | Meyer   2.0
+             | Okafor  2.7
+             | Rossi   1.0
+             | Yilmaz  3.3
+             | Larsen  1.7
+             | Larsen  2.3
+    Result   PASS
+    Why      The professor may read students and grades ...
+
+Step 10  user: smith_professor  (active role: professor_role)
+    SQL      SELECT s.last_name, f.bank_iban FROM university.students s JOIN university.financial_records f ON f.student_id = s.student_id;
+    Expected error 1142 financial_records
+    Actual   error 1142: SELECT command denied to user 'smith_professor'@'172.18.0.1' for table `university`.`financial_records`
+    Result   PASS
+    Why      ... but joining in the DENIED table fails: the DENY is checked per table, not per statement.
+
+Step 11  user: smith_professor  (active role: professor_role)
+    SQL      SELECT * FROM university.FINANCIAL_RECORDS;
+    Expected error 1146 FINANCIAL_RECORDS
+    Actual   error 1146: Table 'university.FINANCIAL_RECORDS' doesn't exist
+    Result   PASS
+    Why      A different letter case is simply a different (non-existent) table on this case-sensitive server (lower_case_table_names=0), so it is not a way around the DENY.
+
+Step 12  user: smith_professor  (active role: professor_role)
+    SQL      UPDATE university.grades SET student_id = 2 WHERE grade_id = 1;
+    Expected error 1143 student_id
+    Actual   error 1143: UPDATE command denied to user 'smith_professor'@'172.18.0.1' for column 'student_id' in table 'grades'
+    Result   PASS
+    Why      Column privilege: she may change a grade but not reassign it to another student.
+
+Step 13  user: smith_professor  (active role: professor_role)
+    SQL      INSERT INTO university.grades (grade_id, student_id, course_id, grade) VALUES (99, 1, 101, 1.0);
+    Expected error 1142 grades
+    Actual   error 1142: INSERT command denied to user 'smith_professor'@'172.18.0.1' for table `university`.`grades`
+    Result   PASS
+    Why      Only UPDATE(grade) was granted: no INSERT and no DELETE.
+
+Step 14  user: smith_professor  (active role: professor_role)
+    SQL      DELETE FROM university.grades WHERE grade_id = 1;
+    Expected error 1142 grades
+    Actual   error 1142: DELETE command denied to user 'smith_professor'@'172.18.0.1' for table `university`.`grades`
+    Result   PASS
+
+Step 15  user: smith_professor  (active role: professor_role)
+    SQL      CREATE TABLE university.copy_of_students AS SELECT * FROM university.students;
+    Expected error 1142
+    Actual   error 1142: INSERT, CREATE command denied to user 'smith_professor'@'172.18.0.1' for table `university`.`copy_of_students`
+    Result   PASS
+    Why      She cannot create objects (for instance a view that would copy data elsewhere).
+
+Step 16  user: jones_finance  (active role: finance_role)
+    SQL      SELECT * FROM university.grades;
+    Expected error 1142 grades
+    Actual   error 1142: SELECT command denied to user 'jones_finance'@'172.18.0.1' for table `university`.`grades`
+    Result   PASS
+
+Step 17  user: jones_finance  (active role: finance_role)
+    SQL      SELECT s.last_name, f.amount_paid FROM university.students s JOIN university.financial_records f ON f.student_id = s.student_id;
+    Expected rows 5
+    Actual   ok (5 rows)
+             | Meyer   1500.00
+             | Okafor  750.00
+             | Rossi   0.00
+             | Yilmaz  1500.00
+             | Larsen  1000.00
+    Result   PASS
+    Why      Finance may read students to look people up, so a join of the two allowed tables works.
+
+Step 18  user: jones_finance  (active role: finance_role)
+    SQL      SELECT * FROM university.courses;
+    Expected error 1142 courses
+    Actual   error 1142: SELECT command denied to user 'jones_finance'@'172.18.0.1' for table `university`.`courses`
+    Result   PASS
+
+Step 19  user: uni_admin  (active role: admin_role)
+    SQL      SELECT * FROM university.financial_records;
+    Expected rows 5
+    Actual   ok (5 rows)
+             | 1  1  1500.00  1500.00  NULL               DE00 1234 5678 0000 0001 01
+             | 2  2  1500.00  750.00   NULL               DE00 1234 5678 0000 0002 02
+             | 3  3  1500.00  0.00     Merit Scholarship  DE00 1234 5678 0000 0003 03
+             | 4  4  1500.00  1500.00  NULL               DE00 1234 5678 0000 0004 04
+             | 5  5  1500.00  1000.00  Women in CS Grant  DE00 1234 5678 0000 0005 05
+    Result   PASS
+    Why      The administrator role is powerful inside the university database ...
+
+Step 20  user: uni_admin  (active role: admin_role)
+    SQL      SELECT * FROM mysql.user;
+    Expected error 1142 user
+    Actual   error 1142: SELECT command denied to user 'uni_admin'@'172.18.0.1' for table `mysql`.`user`
+    Result   PASS
+    Why      ... but it is not a database superuser: no access to the system schema, no account management.
+
+Step 21  user: uni_admin  (active role: admin_role)
+    SQL      CREATE USER evil@'%' IDENTIFIED BY 'x';
+    Expected error 1227
+    Actual   error 1227: Access denied; you need (at least one of) the CREATE USER privilege(s) for this operation
+    Result   PASS
+
+Step 22  user: uni_admin  (active role: admin_role)
+    SQL      GRANT ALL ON *.* TO uni_admin@'%';
+    Expected error 1045
+    Actual   error 1045: Access denied for user 'uni_admin'@'%' (using password: YES)
+    Result   PASS
+    Why      Granting himself global privileges: refused at login level (1045), the admin role holds no GRANT OPTION on *.*.
+Security implication: Each attack fails at the table or column the statement touches. The professor's DENY holds inside joins, and the student's view cannot be widened.
+Security implication: The roles are least-privilege: even uni_admin cannot reach mysql.* or create accounts, so a stolen admin password does not mean a stolen server.
+-> 06_unauthorized_access.sql: 22 passed, 0 failed
+
+==============================================================================
+ Experiment 7: administrative misconfigurations and how to recover
+ (07_misconfiguration_recovery.sql)
+==============================================================================
+Goal: Make three typical administration mistakes on purpose, observe the symptoms, and repair each one.
+  [setup] PASS DROP DATABASE IF EXISTS exp_lab;
+  [setup] PASS DROP USER IF EXISTS exp_u@'%';
+  [setup] PASS DROP ROLE IF EXISTS exp_r;
+  [setup] PASS CREATE DATABASE exp_lab;
+  [setup] PASS CREATE TABLE exp_lab.pub_t (id INT PRIMARY KEY, v VARCHAR(20));
+  [setup] PASS CREATE TABLE exp_lab.secret_t (id INT PRIMARY KEY, v VARCHAR(20));
+  [setup] PASS INSERT INTO exp_lab.pub_t VALUES (1, 'public');
+  [setup] PASS INSERT INTO exp_lab.secret_t VALUES (1, 'top-secret');
+  [setup] PASS CREATE ROLE exp_r;
+  [setup] PASS GRANT SELECT ON exp_lab.pub_t TO exp_r;
+  [setup] PASS CREATE USER exp_u@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+
+Step 1  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      GRANT exp_r TO exp_u@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 2  user: exp_u  (active role: none)
+    SQL      SELECT * FROM exp_lab.pub_t;
+    Expected error 1142 pub_t
+    Actual   error 1142: SELECT command denied to user 'exp_u'@'172.18.0.1' for table `exp_lab`.`pub_t`
+    Result   PASS
+    Why      Symptom: "I was given the role but I get permission errors". The role is held but inactive.
+
+Step 3  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SHOW GRANTS FOR exp_u@'%';
+    Expected excludes SET DEFAULT ROLE
+    Actual   ok (2 rows)
+             | GRANT `exp_r` TO `exp_u`@`%`
+             | GRANT USAGE ON *.* TO `exp_u`@`%` IDENTIFIED VIA ed25519 USING 'fo1d3DnK4W7JRj2Loapj+cLQQIpS1HS669Vj7T+y3tg'
+    Result   PASS
+    Why      Diagnosis: SHOW GRANTS lists the role, but there is no SET DEFAULT ROLE line.
+
+Step 4  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SET DEFAULT ROLE exp_r FOR exp_u@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 5  user: exp_u  (active role: exp_r)
+    SQL      SELECT * FROM exp_lab.pub_t;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  public
+    Result   PASS
+    Why      Repair: the default role applies at the next login (the user may also just run SET ROLE exp_r).
+
+Step 6  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      GRANT ALL PRIVILEGES ON exp_lab.* TO exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 7  user: exp_u  (active role: exp_r)
+    SQL      SELECT * FROM exp_lab.secret_t;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  top-secret
+    Result   PASS
+    Why      Symptom: nothing fails - that is the danger. The user can now read (and change) the secret table.
+
+Step 8  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SELECT grantee, table_schema, privilege_type FROM information_schema.schema_privileges WHERE table_schema = 'exp_lab' AND privilege_type = 'SELECT';
+    Expected contains exp_r
+    Actual   ok (1 rows)
+             | 'exp_r'@''  exp_lab  SELECT
+    Result   PASS
+    Why      Detection: audit the grants from the privilege tables. information_schema.schema_privileges lists database-wide grants.
+
+Step 9  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      REVOKE ALL PRIVILEGES ON exp_lab.* FROM exp_r;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 10  user: exp_u  (active role: exp_r)
+    SQL      SELECT * FROM exp_lab.secret_t;
+    Expected error 1142 secret_t
+    Actual   error 1142: SELECT command denied to user 'exp_u'@'172.18.0.1' for table `exp_lab`.`secret_t`
+    Result   PASS
+
+Step 11  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY SELECT ON exp_lab.* TO PUBLIC;
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      PUBLIC means every account, including the administrator who types it. (Here limited to the scratch database; a global PUBLIC DENY is far worse - see Limitations in the README.)
+
+Step 12  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SELECT * FROM exp_lab.pub_t;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  public
+    Result   PASS
+    Why      Privileges of an OPEN session are not recomputed: the administrator (dba) still works in the session that issued the DENY ...
+
+Step 13  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SELECT * FROM exp_lab.pub_t;
+    Expected error 1142 pub_t
+    Actual   error 1142: SELECT command denied to user 'harness_00f5d3ef'@'172.18.0.1' for table `exp_lab`.`pub_t`
+    Result   PASS
+    Why      ... but after reconnecting, the administrator is locked out of the data too.
+
+Step 14  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      REVOKE DENY SELECT ON exp_lab.* FROM PUBLIC;
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      Recovery: the administrator can still lift a PUBLIC deny (the documented exception: REVOKE DENY ... FROM PUBLIC works with UPDATE on mysql.global_priv).
+
+Step 15  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SELECT * FROM exp_lab.pub_t;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  public
+    Result   PASS
+
+  [cleanup] PASS 4 statements removed everything this script created
+Security implication: Misconfigurations mostly fail silently (mistake 2) or lock people out (1 and 3). SHOW GRANTS and information_schema.*_privileges are the audit tools; REVOKE / REVOKE DENY at the exact level are the repair tools.
+Security implication: A PUBLIC DENY is the sharpest edge of the feature. The official docs warn that denying UPDATE on mysql.global_priv to PUBLIC removes even the recovery path; that case is NOT reproduced here because recovering needs a server restart with privilege checks disabled.
+-> 07_misconfiguration_recovery.sql: 30 passed, 0 failed
+
+==============================================================================
+ Experiment 8: where you attach a DENY matters (role vs account vs PUBLIC)
+ (08_deny_scope_role_vs_user.sql)
+==============================================================================
+Goal: Test whether a user can shed a DENY that is attached to a role by switching roles.
+Goal: Compare the three places a DENY can live and which of them the user cannot escape.
+  [setup] PASS DROP DATABASE IF EXISTS exp_lab;
+  [setup] PASS DROP USER IF EXISTS exp_u@'%';
+  [setup] PASS DROP ROLE IF EXISTS exp_r;
+  [setup] PASS CREATE DATABASE exp_lab;
+  [setup] PASS CREATE TABLE exp_lab.t (id INT PRIMARY KEY, v VARCHAR(20));
+  [setup] PASS INSERT INTO exp_lab.t VALUES (1, 'sensitive');
+  [setup] PASS CREATE ROLE exp_r;
+  [setup] PASS DENY SELECT ON exp_lab.t TO exp_r;
+  [setup] PASS CREATE USER exp_u@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS GRANT exp_r TO exp_u@'%';
+  [setup] PASS SET DEFAULT ROLE exp_r FOR exp_u@'%';
+  [setup] PASS GRANT SELECT ON exp_lab.* TO exp_u@'%';
+
+Step 1  user: exp_u  (active role: exp_r)
+    SQL      SELECT * FROM exp_lab.t;
+    Expected error 1142 t
+    Actual   error 1142: SELECT command denied to user 'exp_u'@'172.18.0.1' for table `exp_lab`.`t`
+    Result   PASS
+    Why      The default role is active, and the DENY inside it beats the direct GRANT.
+
+Step 2  user: exp_u  (active role: none)
+    SQL      SET ROLE NONE;
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      But a user may deactivate their own role. A role's DENY lives only as long as the role is active ...
+
+Step 3  user: exp_u  (active role: none)
+    SQL      SELECT * FROM exp_lab.t;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  sensitive
+    Result   PASS
+    Why      ... and the direct GRANT is then the only rule left. THE DENY IS GONE.
+
+Step 4  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY SELECT ON exp_lab.t TO exp_u@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 5  user: exp_u  (active role: none)
+    SQL      SELECT * FROM exp_lab.t;
+    Expected error 1142 t
+    Actual   error 1142: SELECT command denied to user 'exp_u'@'172.18.0.1' for table `exp_lab`.`t`
+    Result   PASS
+    Why      A DENY on the account itself applies whatever role is active, even NONE - and it takes effect immediately, in the open session.
+
+Step 6  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      REVOKE DENY SELECT ON exp_lab.t FROM exp_u@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 7  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY SELECT ON exp_lab.t TO PUBLIC;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 8  user: exp_u  (active role: none)
+    SQL      SELECT * FROM exp_lab.t;
+    Expected error 1142 t
+    Actual   error 1142: SELECT command denied to user 'exp_u'@'172.18.0.1' for table `exp_lab`.`t`
+    Result   PASS
+
+Step 9  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      REVOKE DENY SELECT ON exp_lab.t FROM PUBLIC;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 10  user: exp_u  (active role: none)
+    SQL      SELECT * FROM exp_lab.t;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  sensitive
+    Result   PASS
+    Why      Control: with every DENY removed, the direct GRANT works again.
+
+  [cleanup] PASS 4 statements removed everything this script created
+Security implication: A DENY on a role is a good fit when the role is the ONLY source of the user's privileges (as with professor_role): shedding the role then loses the GRANTs as well.
+Security implication: When privileges can also reach the user from elsewhere (direct grants, other roles, PUBLIC), attach the DENY to the account or to PUBLIC.
+-> 08_deny_scope_role_vs_user.sql: 26 passed, 0 failed
+
+==============================================================================
+ Experiment 9: DENY and views (SQL SECURITY DEFINER vs INVOKER)
+ (09_views_and_deny.sql)
+==============================================================================
+Goal: Find out whether a DENY on a user also blocks the data that user can reach through a view.
+Goal: Find out what a DENY on the view's DEFINER does to everybody who uses the view.
+  [setup] PASS DROP DATABASE IF EXISTS exp_lab;
+  [setup] PASS DROP USER IF EXISTS exp_definer@'%';
+  [setup] PASS DROP USER IF EXISTS exp_viewer@'%';
+  [setup] PASS CREATE DATABASE exp_lab;
+  [setup] PASS CREATE TABLE exp_lab.t_base (id INT PRIMARY KEY, v VARCHAR(20));
+  [setup] PASS INSERT INTO exp_lab.t_base VALUES (1, 'base-row');
+  [setup] PASS CREATE USER exp_definer@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS CREATE USER exp_viewer@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS GRANT SELECT ON exp_lab.t_base TO exp_definer@'%';
+  [setup] PASS CREATE DEFINER = exp_definer@'%' SQL SECURITY DEFINER VIEW exp_lab.v_definer AS SELECT id, v FROM exp_lab.t_base;
+  [setup] PASS CREATE DEFINER = exp_definer@'%' SQL SECURITY INVOKER VIEW exp_lab.v_invoker AS SELECT id, v FROM exp_lab.t_base;
+  [setup] PASS GRANT SELECT ON exp_lab.v_definer TO exp_viewer@'%';
+  [setup] PASS GRANT SELECT ON exp_lab.v_invoker TO exp_viewer@'%';
+  [setup] PASS DENY SELECT ON exp_lab.t_base TO exp_viewer@'%';
+
+Step 1  user: exp_viewer  (active role: none)
+    SQL      SELECT * FROM exp_lab.t_base;
+    Expected error 1142 t_base
+    Actual   error 1142: SELECT command denied to user 'exp_viewer'@'172.18.0.1' for table `exp_lab`.`t_base`
+    Result   PASS
+    Why      Baseline: the base table is denied.
+
+Step 2  user: exp_viewer  (active role: none)
+    SQL      SELECT * FROM exp_lab.v_definer;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  base-row
+    Result   PASS
+    Why      FINDING: the DENY on the viewer does NOT block the DEFINER view. The view runs with its definer's privileges, so the same rows are reachable.
+
+Step 3  user: exp_viewer  (active role: none)
+    SQL      SELECT * FROM exp_lab.v_invoker;
+    Expected error 1356
+    Actual   error 1356: View 'exp_lab.v_invoker' references invalid table(s) or column(s) or function(s) or definer/invoker of view lack rights to use them
+    Result   PASS
+    Why      The INVOKER view runs with the viewer's own privileges, so here the DENY applies (reported as error 1356: the view cannot be used).
+
+Step 4  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY SELECT ON exp_lab.t_base TO exp_definer@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 5  user: exp_viewer  (active role: none)
+    SQL      SELECT * FROM exp_lab.v_definer;
+    Expected error 1356
+    Actual   error 1356: View 'exp_lab.v_definer' references invalid table(s) or column(s) or function(s) or definer/invoker of view lack rights to use them
+    Result   PASS
+    Why      A DENY on the view's definer applies even though the viewer holds privileges on the view: the view stops working for everyone who uses it.
+
+Step 6  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      REVOKE DENY SELECT ON exp_lab.t_base FROM exp_definer@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 7  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY SELECT ON exp_lab.v_definer TO exp_viewer@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 8  user: exp_viewer  (active role: none)
+    SQL      SELECT * FROM exp_lab.v_definer;
+    Expected error 1142 v_definer
+    Actual   error 1142: SELECT command denied to user 'exp_viewer'@'172.18.0.1' for table `exp_lab`.`v_definer`
+    Result   PASS
+    Why      The reliable fix is to DENY (or not grant) the VIEW itself: access to data is controlled at each object, and a view is an object.
+
+  [cleanup] PASS 3 statements removed everything this script created
+Security implication: A DENY on a base table does not follow data through a SQL SECURITY DEFINER view. Whoever can SELECT the view reads what the definer can read.
+Security implication: Treat definer views as privilege delegation: grant on them deliberately, and keep the definer's own privileges minimal. The project's my_grades view is defined by a dedicated locked account that can only SELECT three tables (sql/03_roles.sql), not by root.
+-> 09_views_and_deny.sql: 25 passed, 0 failed
+
+==============================================================================
+ Experiment 10: what a denied user can still learn (metadata and error codes)
+ (10_metadata_visibility.sql)
+==============================================================================
+Goal: Check which metadata channels hide a denied table, and which still reveal that it exists.
+
+Step 1  user: smith_professor  (active role: professor_role)
+    SQL      SHOW TABLES FROM university;
+    Expected excludes financial_records
+    Actual   ok (4 rows)
+             | courses
+             | grades
+             | my_grades
+             | students
+    Result   PASS
+    Why      Channel 1: SHOW TABLES hides the denied table.
+
+Step 2  user: smith_professor  (active role: professor_role)
+    SQL      SELECT table_name FROM information_schema.tables WHERE table_schema = 'university';
+    Expected excludes financial_records
+    Actual   ok (4 rows)
+             | courses
+             | grades
+             | my_grades
+             | students
+    Result   PASS
+    Why      Channel 2: so does information_schema.
+
+Step 3  user: smith_professor  (active role: professor_role)
+    SQL      SHOW CREATE TABLE university.financial_records;
+    Expected error 1142 financial_records
+    Actual   error 1142: SHOW command denied to user 'smith_professor'@'172.18.0.1' for table `university`.`financial_records`
+    Result   PASS
+    Why      Channel 3: SHOW COLUMNS, SHOW CREATE TABLE and DESCRIBE are refused.
+
+Step 4  user: smith_professor  (active role: professor_role)
+    SQL      SHOW COLUMNS FROM university.financial_records;
+    Expected error 1142 financial_records
+    Actual   error 1142: SELECT command denied to user 'smith_professor'@'172.18.0.1' for table `university`.`financial_records`
+    Result   PASS
+
+Step 5  user: smith_professor  (active role: professor_role)
+    SQL      SELECT * FROM university.financial_records;
+    Expected error 1142 financial_records
+    Actual   error 1142: SELECT command denied to user 'smith_professor'@'172.18.0.1' for table `university`.`financial_records`
+    Result   PASS
+    Why      Channel 4 - A LEAK: reading a denied table gives error 1142 ("command denied") ...
+
+Step 6  user: smith_professor  (active role: professor_role)
+    SQL      SELECT * FROM university.no_such_table;
+    Expected error 1146 no_such_table
+    Actual   error 1146: Table 'university.no_such_table' doesn't exist
+    Result   PASS
+    Why      ... but reading a table that does not exist gives error 1146 ("doesn't exist"). Comparing the two error codes tells an attacker that financial_records exists, although every listing hides it.
+
+Step 7  user: smith_professor  (active role: professor_role)
+    SQL      SHOW GRANTS;
+    Expected excludes DENY
+    Actual   ok (6 rows)
+             | GRANT `professor_role` TO `smith_professor`@`%`
+             | GRANT USAGE ON *.* TO `smith_professor`@`%` IDENTIFIED VIA ed25519 USING 'TcWqMgxiuJB9QzJEFMzx0JgglnV6ASeM7K/zYTgc2dQ'
+             | GRANT USAGE ON *.* TO `professor_role`
+             | GRANT SELECT ON `university`.* TO `professor_role`
+             | GRANT UPDATE (`grade`) ON `university`.`grades` TO `professor_role`
+             | SET DEFAULT ROLE `professor_role` FOR `smith_professor`@`%`
+    Result   PASS
+    Why      The professor cannot read their own DENY: SHOW GRANTS lists GRANT lines only (DENY lines need SELECT on the mysql database) ...
+
+Step 8  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SHOW GRANTS FOR professor_role;
+    Expected contains DENY SELECT ON `university`.`financial_records`
+    Actual   ok (4 rows)
+             | GRANT USAGE ON *.* TO `professor_role`
+             | GRANT SELECT ON `university`.* TO `professor_role`
+             | GRANT UPDATE (`grade`) ON `university`.`grades` TO `professor_role`
+             | DENY SELECT ON `university`.`financial_records` TO `professor_role`
+    Result   PASS
+    Why      ... while the administrator sees the DENY as a separate line, for audits.
+Security implication: Hiding works for listings (SHOW TABLES, information_schema), but the error codes 1142 vs 1146 still reveal that a denied table exists.
+Security implication: Names are not secrets: do not rely on a DENY to hide that a table or column exists. Do not put sensitive information in table names.
+-> 10_metadata_visibility.sql: 8 passed, 0 failed
+
+==============================================================================
+ Experiment 11: database-name patterns - when a GRANT leaks and a DENY is ignored
+ (11_database_name_patterns.sql)
+==============================================================================
+Goal: Test the documented rule that database names in GRANT and DENY are patterns ("_" and "%" are wildcards).
+Goal: See what that does to a GRANT with an unescaped underscore, and to a DENY written as a pattern.
+  [setup] PASS DROP DATABASE IF EXISTS exp_lab_a;
+  [setup] PASS DROP DATABASE IF EXISTS exp1lab1a;
+  [setup] PASS DROP USER IF EXISTS exp_u@'%';
+  [setup] PASS DROP USER IF EXISTS exp_v@'%';
+  [setup] PASS CREATE DATABASE exp_lab_a;
+  [setup] PASS CREATE DATABASE exp1lab1a;
+  [setup] PASS CREATE TABLE exp_lab_a.s (id INT PRIMARY KEY, v VARCHAR(20));
+  [setup] PASS CREATE TABLE exp1lab1a.s (id INT PRIMARY KEY, v VARCHAR(20));
+  [setup] PASS INSERT INTO exp_lab_a.s VALUES (1, 'intended');
+  [setup] PASS INSERT INTO exp1lab1a.s VALUES (1, 'NOT intended');
+  [setup] PASS CREATE USER exp_u@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS CREATE USER exp_v@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS GRANT SELECT ON exp_lab_a.* TO exp_u@'%';
+
+Step 1  user: exp_u  (active role: none)
+    SQL      SELECT * FROM exp_lab_a.s;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  intended
+    Result   PASS
+
+Step 2  user: exp_u  (active role: none)
+    SQL      SELECT * FROM exp1lab1a.s;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  NOT intended
+    Result   PASS
+    Why      LIMITATION: each "_" matches any single character, so the grant also covers exp1lab1a - a database the administrator never meant to expose.
+
+Step 3  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      REVOKE SELECT ON exp_lab_a.* FROM exp_u@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      Repair: escape the underscores with a backslash and grant again.
+
+Step 4  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      GRANT SELECT ON `exp\_lab\_a`.* TO exp_u@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 5  user: exp_u  (active role: none)
+    SQL      SELECT * FROM exp_lab_a.s;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  intended
+    Result   PASS
+
+Step 6  user: exp_u  (active role: none)
+    SQL      SELECT * FROM exp1lab1a.s;
+    Expected error 1142 exp1lab1a
+    Actual   error 1142: SELECT command denied to user 'exp_u'@'172.18.0.1' for table `exp1lab1a`.`s`
+    Result   PASS
+
+Step 7  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      GRANT SELECT ON `exp\_lab\_a`.* TO exp_v@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 8  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY SELECT ON `exp\_lab%`.* TO exp_v@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 9  user: exp_v  (active role: none)
+    SQL      SELECT * FROM exp_lab_a.s;
+    Expected rows 1
+    Actual   ok (1 rows)
+             | 1  intended
+    Result   PASS
+    Why      LIMITATION: only the MOST SPECIFIC matching entry is consulted. The exact grant on exp_lab_a is more specific than the deny pattern exp_lab%, so the broad DENY is silently ignored.
+
+Step 10  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY SELECT ON `exp\_lab\_a`.* TO exp_v@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 11  user: exp_v  (active role: none)
+    SQL      SELECT * FROM exp_lab_a.s;
+    Expected error 1142 s
+    Actual   error 1142: SELECT command denied to user 'exp_v'@'172.18.0.1' for table `exp_lab_a`.`s`
+    Result   PASS
+    Why      A DENY at the same (exact) database name does apply.
+
+  [cleanup] PASS 4 statements removed everything this script created
+Security implication: Escape "_" and "%" in database-level GRANT and DENY (`my\_db`.*), and test with SHOW GRANTS plus a real query.
+Security implication: Never rely on a DENY pattern to override an exact-name grant; deny the exact database or table instead.
+-> 11_database_name_patterns.sql: 28 passed, 0 failed
+
+==============================================================================
+ Experiment 12: password validation and reuse plugins
+ (12_password_policy.sql)
+==============================================================================
+Goal: Check that simple_password_check and password_reuse_check (installed by sql/05_password_policy.sql) also guard ED25519 accounts.
+Goal: Record the real error codes, and find what the policy does NOT catch.
+  [setup] PASS DROP USER IF EXISTS exp_hash@'%';
+
+Step 1  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SHOW VARIABLES WHERE Variable_name IN ('simple_password_check_minimal_length', 'password_reuse_check_interval', 'strict_password_validation');
+    Expected rows 3
+    Actual   ok (3 rows)
+             | password_reuse_check_interval         365
+             | simple_password_check_minimal_length  12
+             | strict_password_validation            ON
+    Result   PASS
+    Why      The policy as the server sees it.
+
+Step 2  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SELECT plugin_name, plugin_status FROM information_schema.plugins WHERE plugin_type = 'PASSWORD VALIDATION';
+    Expected rows 2
+    Actual   ok (2 rows)
+             | simple_password_check  ACTIVE
+             | password_reuse_check   ACTIVE
+    Result   PASS
+
+Step 3  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      CREATE USER exp_weak_{{run}}@'%' IDENTIFIED VIA ed25519 USING PASSWORD('abc');
+    Expected error 1819 simple_password_check
+    Actual   error 1819: Your password does not satisfy the current policy requirements (simple_password_check)
+    Result   PASS
+    Why      Too short and missing character classes: refused, error 1819. Validation applies to IDENTIFIED VIA ed25519 USING PASSWORD(...) too.
+
+Step 4  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      CREATE USER exp_weak_{{run}}@'%' IDENTIFIED VIA ed25519 USING PASSWORD('abc');
+    Expected error 1819 password_reuse_check
+    Actual   error 1819: Your password does not satisfy the current policy requirements (password_reuse_check)
+    Result   PASS
+    Why      FINDING: the SAME weak password again is now reported as REUSED. The refused password was written to the reuse history anyway, although the account was never created.
+
+Step 5  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      CREATE USER exp_weak_{{run}}@'%' IDENTIFIED VIA ed25519 USING PASSWORD('password12345');
+    Expected error 1819 simple_password_check
+    Actual   error 1819: Your password does not satisfy the current policy requirements (simple_password_check)
+    Result   PASS
+    Why      Long enough, but no upper-case letter and no special character.
+
+Step 6  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      CREATE USER exp_weak_{{run}}@'%' IDENTIFIED VIA ed25519;
+    Expected error 1819
+    Actual   error 1819: Your password does not satisfy the current policy requirements (simple_password_check)
+    Result   PASS
+    Why      IDENTIFIED VIA ed25519 with no USING clause means the EMPTY password - which the policy refuses.
+
+Step 7  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      CREATE USER exp_hash@'%' IDENTIFIED VIA ed25519 USING 'lEiAPNNMP1kq0dRsguIBKo/em5EPb9Y0272TblVhRUw';
+    Expected error 1290 strict-password-validation
+    Actual   error 1290: The MariaDB server is running with the --strict-password-validation option so it cannot execute this statement
+    Result   PASS
+    Why      With a validation plugin installed, strict_password_validation also refuses a credential given as a ready-made public key or hash: the plugin could not check it (1290).
+
+Step 8  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      CREATE USER exp_pw_{{run}}@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      A strong password (random for this run) is accepted.
+
+Step 9  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      ALTER USER exp_pw_{{run}}@'%' IDENTIFIED VIA ed25519 USING PASSWORD('Weak-pass');
+    Expected error 1396
+    Actual   error 1396: Operation ALTER USER failed for 'exp_pw_e92180'@'%'
+    Result   PASS
+    Why      FINDING: a WEAK password set with ALTER USER is refused too - but reported as the generic 1396, not 1819 ...
+
+Step 10  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SHOW WARNINGS;
+    Expected contains simple_password_check
+    Actual   ok (4 rows)
+             | Warning  1819  simple_password_check: Too short password (< 12)
+             | Warning  1819  simple_password_check: Not enough digits (< 1)
+             | Error    1819  Your password does not satisfy the current policy requirements (simple_password_check)
+             | Error    1396  Operation ALTER USER failed for 'exp_pw_e92180'@'%'
+    Result   PASS
+    Why      ... the reason (simple_password_check) is only in the warnings.
+
+Step 11  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SET PASSWORD FOR exp_pw_{{run}}@'%' = PASSWORD('{{pw}}');
+    Expected error 1819 password_reuse_check
+    Actual   error 1819: Your password does not satisfy the current policy requirements (password_reuse_check)
+    Result   PASS
+    Why      Setting the same password again with SET PASSWORD: refused by password_reuse_check, error 1819. The account keeps its ed25519 plugin.
+
+Step 12  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      ALTER USER exp_pw_{{run}}@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+    Expected error 1396
+    Actual   error 1396: Operation ALTER USER failed for 'exp_pw_e92180'@'%'
+    Result   PASS
+    Why      FINDING: the same reuse through ALTER USER is reported as the generic error 1396 ("Operation ALTER USER failed") ...
+
+Step 13  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SHOW WARNINGS;
+    Expected contains password_reuse_check: The password was already used
+    Actual   ok (3 rows)
+             | Warning  1819  password_reuse_check: The password was already used
+             | Error    1819  Your password does not satisfy the current policy requirements (password_reuse_check)
+             | Error    1396  Operation ALTER USER failed for 'exp_pw_e92180'@'%'
+    Result   PASS
+    Why      ... the real reason is only visible in the warnings. Code that checks for 1819 to detect a policy violation would miss it.
+
+Step 14  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DROP USER exp_pw_{{run}}@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      FINDING: the history also outlives the account. Drop it and create it again with its old password: refused as reused.
+
+Step 15  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      CREATE USER exp_pw_{{run}}@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+    Expected error 1819 password_reuse_check
+    Actual   error 1819: Your password does not satisfy the current policy requirements (password_reuse_check)
+    Result   PASS
+
+Step 16  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      CREATE USER exp_pw2_{{run}}@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      FINDING: reuse is checked per account. Another account may use exactly the same password.
+
+Step 17  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      CREATE USER exp_weak_{{run}}@'%' IDENTIFIED VIA ed25519 USING PASSWORD('exp_weak_{{run}}-Password-1');
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      FINDING: simple_password_check only counts characters; a password that contains the account name passes.
+
+Step 18  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SELECT user, plugin FROM mysql.user WHERE authentication_string = '' AND plugin = 'mysql_native_password' AND user IN ('my_grades_owner', 'mariadb.sys');
+    Expected rows 2
+    Actual   ok (2 rows)
+             | mariadb.sys      mysql_native_password
+             | my_grades_owner  mysql_native_password
+    Result   PASS
+    Why      FINDING: the policy only runs when a password is SET. Accounts created before the plugins were installed keep their old credential: here two LOCKED accounts with an empty password (my_grades_owner from sql/03_roles.sql, and the image's mariadb.sys).
+
+  [cleanup] PASS 2 statements removed everything this script created
+Security implication: Both plugins guard ED25519 accounts and every way of setting a password (CREATE USER, ALTER USER, SET PASSWORD); strict validation blocks the pre-computed-key loophole.
+Security implication: They do not re-check existing credentials, do not stop two accounts sharing a password, and do not compare the password with the account name. Lock accounts that must never log in (as this project does).
+Security implication: The reuse history keeps refused passwords and outlives DROP USER: it grows forever (mysql.password_reuse_check_history) and makes a re-created account inherit the old account's history.
+-> 12_password_policy.sql: 21 passed, 0 failed
+
+==============================================================================
+ Experiment 13: DENY on stored procedures and functions
+ (13_routine_deny.sql)
+==============================================================================
+Goal: Block one procedure and one function that a database-level GRANT EXECUTE allows.
+Goal: Check metadata hiding, the routine-type rule, REVOKE DENY, and what DROP does to a routine's DENY.
+  [setup] PASS DROP DATABASE IF EXISTS exp_lab;
+  [setup] PASS DROP USER IF EXISTS exp_u@'%';
+  [setup] PASS CREATE DATABASE exp_lab;
+  [setup] PASS CREATE PROCEDURE exp_lab.payroll_report() SELECT 'payroll report' AS result;
+  [setup] PASS CREATE FUNCTION exp_lab.salary_of(id INT) RETURNS INT DETERMINISTIC RETURN 5000 + id;
+  [setup] PASS CREATE PROCEDURE exp_lab.public_report() SELECT 'public report' AS result;
+  [setup] PASS CREATE USER exp_u@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+  [setup] PASS GRANT EXECUTE ON exp_lab.* TO exp_u@'%';
+
+Step 1  user: exp_u  (active role: none)
+    SQL      CALL exp_lab.payroll_report();
+    Expected contains payroll report
+    Actual   ok (1 rows)
+             | payroll report
+    Result   PASS
+    Why      Control: the database-level GRANT EXECUTE covers every routine.
+
+Step 2  user: exp_u  (active role: none)
+    SQL      SELECT exp_lab.salary_of(1);
+    Expected contains 5001
+    Actual   ok (1 rows)
+             | 5001
+    Result   PASS
+
+Step 3  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY EXECUTE ON PROCEDURE exp_lab.payroll_report TO exp_u@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 4  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY EXECUTE ON FUNCTION exp_lab.salary_of TO exp_u@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 5  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SHOW GRANTS FOR exp_u@'%';
+    Expected contains DENY EXECUTE ON PROCEDURE `exp_lab`.`payroll_report`
+    Actual   ok (4 rows)
+             | GRANT USAGE ON *.* TO `exp_u`@`%` IDENTIFIED VIA ed25519 USING '5BQVVIZEh7dlRktU78pmny/xxwsqUqJTdEE0JRJe/fU'
+             | GRANT EXECUTE ON `exp_lab`.* TO `exp_u`@`%`
+             | DENY EXECUTE ON PROCEDURE `exp_lab`.`payroll_report` TO `exp_u`@`%`
+             | DENY EXECUTE ON FUNCTION `exp_lab`.`salary_of` TO `exp_u`@`%`
+    Result   PASS
+    Why      The DENY lines name the routine type.
+
+Step 6  user: exp_u  (active role: none)
+    SQL      CALL exp_lab.payroll_report();
+    Expected error 1370 payroll_report
+    Actual   error 1370: execute command denied to user 'exp_u'@'%' for routine 'exp_lab.payroll_report'
+    Result   PASS
+    Why      The procedure is refused despite the database-level GRANT: error 1370 ("execute command denied ... for routine").
+
+Step 7  user: exp_u  (active role: none)
+    SQL      SELECT exp_lab.salary_of(1);
+    Expected error 1370 salary_of
+    Actual   error 1370: execute command denied to user 'exp_u'@'%' for routine 'exp_lab.salary_of'
+    Result   PASS
+
+Step 8  user: exp_u  (active role: none)
+    SQL      CALL exp_lab.public_report();
+    Expected contains public report
+    Actual   ok (1 rows)
+             | public report
+    Result   PASS
+    Why      The routine that was not denied still works.
+
+Step 9  user: exp_u  (active role: none)
+    SQL      SELECT routine_name FROM information_schema.routines WHERE routine_schema = 'exp_lab';
+    Expected rows 1
+    Actual   ok (1 rows)
+             | public_report
+    Result   PASS
+    Why      Metadata: the denied routines disappear from INFORMATION_SCHEMA.ROUTINES; only public_report is listed.
+
+Step 10  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DENY EXECUTE ON exp_lab.payroll_report TO exp_u@'%';
+    Expected error 1144
+    Actual   error 1144: Illegal GRANT/REVOKE command; please consult the manual to see which privileges can be used
+    Result   PASS
+    Why      Without PROCEDURE/FUNCTION the name is read as a TABLE, and EXECUTE is not a table privilege: error 1144.
+
+Step 11  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      REVOKE DENY EXECUTE ON exp_lab.salary_of FROM exp_u@'%';
+    Expected error 1144
+    Actual   error 1144: Illegal GRANT/REVOKE command; please consult the manual to see which privileges can be used
+    Result   PASS
+    Why      The same rule applies to REVOKE DENY.
+
+Step 12  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      REVOKE DENY EXECUTE ON PROCEDURE exp_lab.payroll_report FROM exp_u@'%';
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      With the type, REVOKE DENY lifts the procedure's deny.
+
+Step 13  user: exp_u  (active role: none)
+    SQL      CALL exp_lab.payroll_report();
+    Expected contains payroll report
+    Actual   ok (1 rows)
+             | payroll report
+    Result   PASS
+
+Step 14  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      DROP FUNCTION exp_lab.salary_of;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 15  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      SHOW GRANTS FOR exp_u@'%';
+    Expected excludes DENY EXECUTE ON FUNCTION
+    Actual   ok (2 rows)
+             | GRANT USAGE ON *.* TO `exp_u`@`%` IDENTIFIED VIA ed25519 USING '5BQVVIZEh7dlRktU78pmny/xxwsqUqJTdEE0JRJe/fU'
+             | GRANT EXECUTE ON `exp_lab`.* TO `exp_u`@`%`
+    Result   PASS
+    Why      The function's DENY is gone together with the function.
+
+Step 16  user: dba (harness_00f5d3ef)  (active role: none)
+    SQL      CREATE FUNCTION exp_lab.salary_of(id INT) RETURNS INT DETERMINISTIC RETURN 5000 + id;
+    Expected ok
+    Actual   ok
+    Result   PASS
+
+Step 17  user: exp_u  (active role: none)
+    SQL      SELECT exp_lab.salary_of(1);
+    Expected contains 5001
+    Actual   ok (1 rows)
+             | 5001
+    Result   PASS
+    Why      Re-created under the same name: the deny does NOT come back, the database GRANT applies again. Compare experiment 4: a DATABASE-level deny survives DROP DATABASE.
+
+  [cleanup] PASS 2 statements removed everything this script created
+Security implication: DENY EXECUTE closes one routine inside a broadly granted schema, and hides it from INFORMATION_SCHEMA.ROUTINES.
+Security implication: Routine denies are tied to the routine: dropping it removes the deny, so a re-created routine is open again. Re-apply the DENY in the same migration that re-creates the routine.
+-> 13_routine_deny.sql: 27 passed, 0 failed
+
+TOTAL: 373 steps passed, 0 failed
+
+Demo finished: every step above ended in PASS. Run 'make test' for the pytest suite.

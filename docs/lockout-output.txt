@@ -1,0 +1,108 @@
+bash experiments/14_public_lockout.sh
+==============================================================================
+ Experiment 14: PUBLIC hard lockout and recovery (disposable server university-lockout-15958)
+==============================================================================
+
+--- Part 1: DENY UPDATE ON *.* TO PUBLIC ---
+
+Step 1  user: root@localhost (new session)
+    SQL      CREATE DATABASE lab; CREATE TABLE lab.t (id INT); INSERT INTO lab.t VALUES (1); UPDATE lab.t SET id = 2;
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      Baseline: root can write.
+
+Step 2  user: root@localhost (new session)
+    SQL      DENY UPDATE ON *.* TO PUBLIC; UPDATE lab.t SET id = 3;
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      Deny UPDATE on everything to PUBLIC - that includes root. In the SAME session the UPDATE still works (privileges were read at login) ...
+
+Step 3  user: root@localhost (new session)
+    SQL      UPDATE lab.t SET id = 4;
+    Expected ERROR 1142
+    Actual   ERROR 1142 (42000): UPDATE command denied to user 'root'@'localhost' for table `lab`.`t`
+    Result   PASS
+    Why      ... but every NEW session of root is refused.
+
+Step 4  user: root@localhost (new session)
+    SQL      REVOKE DENY UPDATE ON *.* FROM PUBLIC;
+    Expected ERROR 1045
+    Actual   ERROR 1045 (28000): Access denied for user 'root'@'localhost' (using password: NO)
+    Result   PASS
+    Why      The normal recovery path is closed: REVOKE DENY ... FROM PUBLIC needs UPDATE on mysql.global_priv. Note the misleading code: 1045 'Access denied ... (using password: NO)' reads like a failed LOGIN.
+
+Step 5  user: root@localhost (new session)
+    SQL      UPDATE mysql.global_priv SET Priv = '{}' WHERE User = 'PUBLIC';
+    Expected ERROR 1142
+    Actual   ERROR 1142 (42000): UPDATE command denied to user 'root'@'localhost' for table `mysql`.`global_priv`
+    Result   PASS
+    Why      Editing the privilege table directly is UPDATE as well.
+
+Step 6  user: root@localhost (new session)
+    SQL      DELETE FROM mysql.global_priv WHERE User = 'PUBLIC'; FLUSH PRIVILEGES;
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      Documented recovery: DELETE was never denied - remove PUBLIC's row and reload the privilege tables.
+
+Step 7  user: root@localhost (new session)
+    SQL      UPDATE lab.t SET id = 5;
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      A new session can write again.
+
+--- Part 2: DENY UPDATE, DELETE ON *.* TO PUBLIC ---
+
+Step 8  user: root@localhost (new session)
+    SQL      CREATE DATABASE lab; CREATE TABLE lab.t (id INT); INSERT INTO lab.t VALUES (1);
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      Baseline.
+
+Step 9  user: root@localhost (new session)
+    SQL      DENY UPDATE, DELETE ON *.* TO PUBLIC;
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      Now deny DELETE too.
+
+Step 10  user: root@localhost (new session)
+    SQL      DELETE FROM mysql.global_priv WHERE User = 'PUBLIC';
+    Expected ERROR 1142
+    Actual   ERROR 1142 (42000): DELETE command denied to user 'root'@'localhost' for table `mysql`.`global_priv`
+    Result   PASS
+    Why      The documented recovery is closed as well: root cannot delete PUBLIC's row.
+
+Step 11  user: root@localhost (new session)
+    SQL      REVOKE DENY UPDATE, DELETE ON *.* FROM PUBLIC;
+    Expected ERROR 1045
+    Actual   ERROR 1045 (28000): Access denied for user 'root'@'localhost' (using password: NO)
+    Result   PASS
+    Why      Nothing an account can do over SQL lifts it.
+
+Restarting the server with --skip-grant-tables (needs access to the server itself, not just SQL) ...
+
+Step 12  user: root@localhost (new session)
+    SQL      DELETE FROM mysql.global_priv WHERE User = 'PUBLIC';
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      Without privilege checks, delete PUBLIC's row.
+
+Restarting normally ...
+
+Step 13  user: root@localhost (new session)
+    SQL      UPDATE lab.t SET id = 2; DELETE FROM lab.t;
+    Expected ok
+    Actual   ok
+    Result   PASS
+    Why      Back to normal: root can write again.
+
+Security implication: a PUBLIC DENY can lock out every administrator. If it also covers DELETE (or
+the mysql schema), only someone who can restart the server with --skip-grant-tables gets back in.
+
+-> 14_public_lockout.sh: 13 passed, 0 failed

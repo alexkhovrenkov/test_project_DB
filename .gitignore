@@ -12,4 +12,4 @@ __pycache__/
 .coverage
 
 # Local output captured by "make demo | tee"
-demo-output.txt
+/demo-output.txt

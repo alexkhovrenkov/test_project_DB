@@ -2,6 +2,8 @@ A project for area 5, "Authentication and access control" for the [MariaDB stude
 
 # Protecting a University Database with MariaDB 13.1: Roles, DENY, ED25519 and Verified TLS
 
+[![CI](https://github.com/alexkhovrenkov/test_project_DB/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/alexkhovrenkov/test_project_DB/actions/workflows/ci.yml)
+
 **Constructor University** · **Repository:** <https://github.com/alexkhovrenkov/test_project_DB> · **Branch:** `main`
 **MariaDB version:** 13.1.2 (`13.1.2-MariaDB-ubu2604`, a preview release). [docker-compose.yml](docker-compose.yml) uses,
 by default, the exact build all results below come from:
@@ -12,7 +14,7 @@ To try the newest 13.1 preview build instead, put `MARIADB_IMAGE=quay.io/mariadb
 ```bash
 git clone https://github.com/alexkhovrenkov/test_project_DB.git && cd test_project_DB
 make demo      # creates certificates, starts MariaDB 13.1, runs every demonstration (no password to configure)
-make test      # 117 integration tests against the real server
+make test      # 260 tests: 100 unit + 160 integration tests against the real server
 ```
 
 ## Contents
@@ -24,7 +26,7 @@ make test      # 117 integration tests against the real server
 5. [Architecture](#5-architecture)
 6. [Roles and permissions](#6-roles-and-permissions)
 7. [DENY explained](#7-deny-explained)
-8. [Authentication: ED25519](#8-authentication-ed25519)
+8. [Authentication: no password in any file](#8-authentication-no-password-in-any-file)
 9. [TLS that is verified, not assumed](#9-tls-that-is-verified-not-assumed)
 10. [Security experiments (advanced)](#10-security-experiments-advanced)
 11. [Findings: limits and surprises of MariaDB access control](#11-findings-limits-and-surprises-of-mariadb-access-control)
@@ -50,8 +52,8 @@ fictional university database that holds things worth protecting (grades, bank d
   memory, and the run's administrator additionally needs a **client certificate** (`REQUIRE X509`),
 * forces every network connection through **TLS** and **verifies** the server certificate *and* host name,
 * **attacks** every one of those controls and shows which MariaDB mechanism stopped which attack,
-* **probes the edges**: eleven experiments on conflicting permissions, role inheritance, views, metadata
-  leaks, pattern names and administrative mistakes - some of which found behaviour that is not obvious
+* **probes the edges**: fourteen experiments on conflicting permissions, role inheritance, views, metadata
+  leaks, pattern names, routines, password policy and administrative mistakes - some of which found behaviour that is not obvious
   from the documentation (section 11).
 
 The Python code is deliberately small: it sends SQL to MariaDB and prints MariaDB's answer. **All security
@@ -65,7 +67,7 @@ method instead of a password in a config file, verified TLS, then attack the set
 | Roles and `DENY` doing the work | [sql/03_roles.sql](sql/03_roles.sql); sections 6-7; experiments 1, 2, 8 |
 | Authentication method instead of a stored password | `unix_socket` for root, ED25519 (+ X509 for the harness), no password on disk: [sql/04_users.sql](sql/04_users.sql), [sql/06_lockdown.sh](sql/06_lockdown.sh), [app/admin.py](app/admin.py); section 8 |
 | An attack against each control | section 12; [experiments/](experiments/); [tests/](tests/) |
-| TLS verified rather than assumed, and shown to be | section 9; [tests/test_tls.py](tests/test_tls.py) |
+| TLS verified rather than assumed, and shown to be | section 9; [tests/integration/test_tls.py](tests/integration/test_tls.py) |
 | Reproducible from the README on a fresh server | `make demo`; section 3; verified from a clean copy (section 13) |
 | Which control stops which attack, what remains unprotected | sections 12 and 15 |
 
@@ -111,8 +113,8 @@ Each fails differently: a stolen password table (ED25519 helps), a sniffed netwo
 ## 3. Requirements and quick start
 
 **You need:** Docker with the Compose plugin (Docker Desktop on macOS/Windows), Python 3.10 or newer (tested with 3.13), `make`,
-`openssl`, `bash`. On Windows use WSL. Developed and verified on macOS (Apple silicon) with Docker 29,
-the pinned image was additionally run on x86_64 (emulated).
+`openssl`, `bash`. On Windows use WSL (below). Developed and verified on macOS (Apple silicon) with Docker 29;
+CI runs everything on GitHub's x86_64 Ubuntu runners (section 13).
 
 ```bash
 git clone https://github.com/alexkhovrenkov/test_project_DB.git
@@ -125,14 +127,19 @@ generate a CA, a server certificate and a client certificate with owner-only key
 ([scripts/generate_certs.sh](scripts/generate_certs.sh)), start MariaDB 13.1 with TLS required
 (`docker compose up -d --wait`; on the first start `sql/` creates schema, data, roles and *locked* users and
 switches root to `unix_socket`), create a Python virtual environment, create a short-lived administrator
-that gives the demo accounts random in-memory passwords ([app/admin.py](app/admin.py)), and run (1) the role demo, (2) the 5 tutorial examples, (3) the 11 experiments (about 2,000 lines of output, saved from a real run in [docs/demo-output.txt](docs/demo-output.txt)).
+that gives the demo accounts random in-memory passwords ([app/admin.py](app/admin.py)), and run (1) the role demo, (2) the 5 tutorial examples, (3) experiments 1-13 (about 2,300 lines of output, saved from a real run in
+[docs/demo-output.txt](docs/demo-output.txt)). Experiment 14 needs a throw-away server of its own: `make lockout`.
+New to the project? [examples/README.md](examples/README.md) starts with a 10-minute walk-through.
 Every step prints `PASS`/`FAIL`; any failure makes `make` exit non-zero.
 
 | Command | Does |
 |---|---|
 | `make demo` | everything above |
-| `make test` | start the server if needed, run the 117-test pytest suite |
+| `make test` | start the server if needed, run all 260 tests with coverage of `app/` |
+| `make unit` | only the 100 unit tests - no server, no Docker needed |
+| `make lint` | ruff (Python) and shellcheck (shell scripts) |
 | `make roles` / `make examples` / `make experiments` | one part of the demo |
+| `make lockout` | experiment 14 on its own disposable server |
 | `make set-password USER=smith_professor` | choose a password for a demo account (typed, never stored) and unlock it |
 | `make sql USER=smith_professor` | `mariadb` client as that account (asks for the password) |
 | `make shell` | `mariadb` client as root, through the container socket - no password |
@@ -215,19 +222,27 @@ Files: [sql/01_schema.sql](sql/01_schema.sql), [sql/02_data.sql](sql/02_data.sql
   python app/demo.py ─┐
   python app/menu.py ─┼──►  app/database.py ══ TLS 1.2/1.3, server cert verified ══►  MariaDB 13.1 (Docker)
   pytest (tests/)    ─┤     (ED25519 login,                                        ├─ require_secure_transport=ON
-  app/sqlrunner.py ───┘      ssl_verify_cert + identity)                           ├─ roles / GRANT / DENY decide every query
-         ▲                                                                          └─ mysql.global_priv holds the rules
-  examples/*.sql, experiments/*.sql  (annotated SQL; each step states what MariaDB must answer)
+  app/sqlrunner.py ───┘      ssl_verify_cert + identity,                           ├─ roles / GRANT / DENY decide every query
+         ▲                   client cert for the harness)                          ├─ password policy plugins
+         │                                                                          └─ mysql.global_priv holds the rules
+  examples/*.sql, experiments/*.sql                                                         ▲
+  (annotated SQL; each step states                                                          │ unix_socket, no password
+   what MariaDB must answer)         app/admin.py ── docker exec ... mariadb (root) ────────┘ (creates/drops the
+                                                                                             short-lived harness)
 ```
 
 * [app/database.py](app/database.py) opens connections: ED25519 login, TLS with `ssl_verify_cert=True` and
-  `ssl_verify_identity=True`. **No permission logic.** Values reach SQL only as `%s` parameters.
+  `ssl_verify_identity=True`, optionally the client certificate. Passwords come from memory or `getpass`,
+  never from a file. **No permission logic.** Values reach SQL only as `%s` parameters.
+* [app/admin.py](app/admin.py) talks to socket-authenticated root through `docker exec`, creates and drops
+  the short-lived harness administrator of each run, and implements `make set-password` (section 8).
 * [app/actions.py](app/actions.py) holds the university SQL (fixed strings) and the validated `update_grade`.
 * [app/demo.py](app/demo.py) runs the same six actions as each role and prints expected / actual / PASS-FAIL.
   Its policy table is a *checklist for verification*; it enforces nothing.
 * [app/sqlrunner.py](app/sqlrunner.py) executes the annotated `.sql` tutorial files as the user named in each
   step and compares the result with the file's stated expectation. The SQL files are the experiments;
   pytest runs them too, so documentation cannot drift from reality.
+* [tests/unit/](tests/unit/) need no server; [tests/integration/](tests/integration/) run against the real one.
 * [docker-compose.yml](docker-compose.yml) starts MariaDB with TLS; the port is published on `127.0.0.1` only.
 
 ## 6. Roles and permissions
@@ -237,7 +252,7 @@ users. A new professor needs one statement, `GRANT professor_role TO new_profess
 privileges get copied per person and drift apart.
 
 What each role may do ([sql/03_roles.sql](sql/03_roles.sql); every cell is checked by `make roles` and
-`tests/test_permissions.py::test_role_matrix`, 24 combinations):
+`tests/integration/test_permissions.py::test_role_matrix`, 24 combinations):
 
 | Role | `courses` | `students` | `grades` | `my_grades` view | `financial_records` |
 |---|---|---|---|---|---|
@@ -383,7 +398,7 @@ applies to `IDENTIFIED VIA ed25519 USING PASSWORD(...)` and to `SET PASSWORD` fo
 (error 1290), which the plugins could not check. The random passwords of the harness and the demo runs always
 contain all character classes (`strong_password()` in [app/database.py](app/database.py)).
 [experiments/12_password_policy.sql](experiments/12_password_policy.sql) and
-[tests/test_password_policy.py](tests/test_password_policy.py) show it; real excerpt:
+[tests/integration/test_password_policy.py](tests/integration/test_password_policy.py) show it; real excerpt:
 
 ```
 Step 10  user: dba (harness_fcbbec84)  (active role: none)
@@ -413,8 +428,8 @@ private key from the typed password and *signs* the challenge; the server verifi
 A failure returns `ERROR 1045 Access denied` before any query can run - the same error for a wrong password and
 for a non-existent user, so accounts cannot be enumerated.
 
-Attacks and results ([tests/test_authentication.py](tests/test_authentication.py),
-[tests/test_account_model.py](tests/test_account_model.py), [example 5](examples/05_ed25519_authentication.sql)):
+Attacks and results ([tests/integration/test_authentication.py](tests/integration/test_authentication.py),
+[tests/integration/test_account_model.py](tests/integration/test_account_model.py), [example 5](examples/05_ed25519_authentication.sql)):
 
 | Attack / check | Expected | Actual |
 |---|---|---|
@@ -448,7 +463,7 @@ authority. Server side ([docker-compose.yml](docker-compose.yml)):
 `--ssl-cert/--ssl-key/--ssl-ca`, `--tls-version=TLSv1.2,TLSv1.3`, `--require-secure-transport=ON`.
 Client side ([app/database.py](app/database.py)): `ssl_ca=certs/ca.pem`, `ssl_verify_cert=True`, `ssl_verify_identity=True`.
 
-| Attempt ([tests/test_tls.py](tests/test_tls.py)) | Who refuses | Real result |
+| Attempt ([tests/integration/test_tls.py](tests/integration/test_tls.py)) | Who refuses | Real result |
 |---|---|---|
 | Correct CA, full verification | - | ✅ connected, `TLSv1.3`, `TLS_AES_256_GCM_SHA384` |
 | Client trusts a different CA | client | ❌ `[SSL: CERTIFICATE_VERIFY_FAILED] ... self-signed certificate in certificate chain` |
@@ -466,11 +481,12 @@ $ docker compose exec mariadb ls -l /etc/mysql/tls
 -rw-r--r-- 1 mysql mysql 1131 server-cert.pem
 -rw------- 1 mysql mysql 1704 server-key.pem
 ```
-`tests/test_repository_security.py` fails if any `certs/*-key.pem` is group/other-accessible.
+`tests/unit/test_repository_security.py` fails if any `certs/*-key.pem` is group/other-accessible.
 
 ## 10. Security experiments (advanced)
 
-Every experiment is an annotated SQL file. Each step is run **as the named user**, over verified TLS, and
+Experiments 1-13 are annotated SQL files (14 is a shell script, because it needs its own throw-away server).
+Each step is run **as the named user**, over verified TLS, and
 printed with SQL, expected result, actual result and PASS/FAIL, plus a "Why" explanation and a security
 takeaway. Initial configuration is the visible `[setup]` block at the top of each run. Each file removes
 everything it created and touches only scratch objects (`exp_*`, `tut_*`), apart from the read-only
@@ -509,7 +525,7 @@ ED25519 failures) - see [examples/README.md](examples/README.md) for how to foll
 
 Run them:
 ```bash
-make experiments                                       # all 11
+make experiments                                       # experiments 1-13 (14: make lockout)
 .venv/bin/python app/sqlrunner.py experiments/08_deny_scope_role_vs_user.sql   # one
 .venv/bin/python app/sqlrunner.py --quiet experiments/ # only PASS/FAIL lines
 ```
@@ -519,7 +535,8 @@ Complete output of a clean run: [docs/demo-output.txt](docs/demo-output.txt).
 
 Everything here was observed on **13.1.2** (a preview release - behaviour may change; the CI "canary" job
 re-runs the tests weekly against the floating `13.1` tag to notice). Each finding is reproduced by an
-experiment *and* asserted by a test.
+experiment or a test that asserts the observed behaviour (finding 8 by `make lockout`, which exits non-zero
+if any step differs).
 
 1. **A DENY on an inherited role is not enforced until the role graph is rebuilt (fail-open window).**
    After `DENY SELECT ON t TO role_c`, where `role_c` is granted to `role_b`, granted to the role the user
@@ -581,18 +598,6 @@ experiment *and* asserted by a test.
     (the policy never re-checks them: `my_grades_owner` and the image's `mariadb.sys` keep an empty password -
     both are locked, which is why locking matters). (experiment 12)
 
-Real excerpt of `make lockout` (finding 8):
-```
-Step 10  user: root@localhost (new session)
-    SQL      DELETE FROM mysql.global_priv WHERE User = 'PUBLIC';
-    Expected ERROR 1142
-    Actual   ERROR 1142 (42000): DELETE command denied to user 'root'@'localhost' for table `mysql`.`global_priv`
-    Result   PASS
-    Why      The documented recovery is closed as well: root cannot delete PUBLIC's row.
-...
--> 14_public_lockout.sh: 13 passed, 0 failed
-```
-
 12. **A `unix_socket`-only account opens a user-enumeration oracle.** For a login with an *unknown* user name,
     MariaDB imitates the authentication plugin of a random existing account. When it picks a `unix_socket`
     account the attempt fails with **1698** ("Access denied for user ...", without "using password"),
@@ -614,6 +619,18 @@ Step 10  user: root@localhost (new session)
     accounts. *Implication:* never leave a `unix_socket`-only account on a server that is reachable over the
     network; put `unix_socket` first in an `OR` chain that ends with a method network accounts use.
 
+Real excerpt of `make lockout` (finding 8):
+```
+Step 10  user: root@localhost (new session)
+    SQL      DELETE FROM mysql.global_priv WHERE User = 'PUBLIC';
+    Expected ERROR 1142
+    Actual   ERROR 1142 (42000): DELETE command denied to user 'root'@'localhost' for table `mysql`.`global_priv`
+    Result   PASS
+    Why      The documented recovery is closed as well: root cannot delete PUBLIC's row.
+...
+-> 14_public_lockout.sh: 13 passed, 0 failed
+```
+
 Routine-level DENY (experiment 13) behaved exactly as documented. Real excerpt:
 ```
 Step 7  user: exp_u  (active role: none)
@@ -634,7 +651,7 @@ privilege silently returns `NULL` instead of an error.
 
 | Attack | Stopped by | Evidence | Real error |
 |---|---|---|---|
-| Stranger guesses a password | ED25519 login | [test_authentication.py](tests/test_authentication.py) | 1045 |
+| Stranger guesses a password | ED25519 login | [test_authentication.py](tests/integration/test_authentication.py) | 1045 |
 | Attacker steals `mysql.user` and replays the stored value | ED25519 stores a public key only | `test_stolen_authentication_string...` | 1045 |
 | Account enumeration through error messages | identical error for unknown user / wrong password | `test_unknown_user_and_wrong_password_look_identical` | 1045 |
 | Account enumeration through the imitated plugin (finding 12) | root's auth chain ends in ed25519 | `test_unknown_users_are_indistinguishable_from_real_ones` | 1045 (never 1698) |
@@ -660,61 +677,82 @@ privilege silently returns `NULL` instead of an error.
 | SQL injection through the app | parameters + input validation | `test_update_grade_rejects_injection_payloads` | ValueError / no match |
 
 **Not protected** - see also section 15: a legitimate reader copying data (finance can copy every IBAN);
-anyone with root; the server host or Docker daemon; weak passwords; a compromised client machine;
+anyone who can become root (here: `docker exec`); the server host or Docker daemon; passwords that pass the
+policy but are shared or contain the account name; a compromised client machine;
 the metadata leaks of section 11; and a role-attached DENY next to a second source of the same privilege.
 
 ## 13. Test results
 
-All numbers are from actual runs on 2026-10-11 against `13.1.2-MariaDB-ubu2604` (arm64 and x86_64).
+All numbers are from real runs on 2026-10-11 against `13.1.2-MariaDB-ubu2604`, from a **fresh clone of `main`**
+in a new directory (macOS, arm64), and from GitHub Actions (Ubuntu, x86_64):
 
-| Command | Result |
+| Command (fresh clone) | Result |
 |---|---|
-| `make demo`, from a clean copy of the repository (no `.env`, certs or venv; native arm64) | exit 0 - role demo **24/24** actions as expected; tutorial examples **108/108** steps; experiments **325/325** steps; 0 FAIL |
-| `make demo` a second time on the same server | exit 0, identical totals (idempotent) |
-| `make test` (pytest, real server, same clean copy) | **117 passed** in ~1 s ([docs/test-output.txt](docs/test-output.txt)) |
-| pinned image as **x86_64** (emulated on Apple silicon): `make test` and `make demo` | 117 passed; role demo 24/24; examples 108/108; experiments 325/325 |
-| `shellcheck` on `scripts/*.sh`, `sql/*.sh` (official Docker image) | no findings |
+| `make clean && make demo` | exit 0 - role demo **24/24** actions as expected; tutorial examples **108/108** steps; experiments 1-13 **373/373** steps; no FAIL ([docs/demo-output.txt](docs/demo-output.txt)) |
+| `make demo` a second time | exit 0, identical totals (idempotent) |
+| `make test` | **260 passed** (100 unit + 160 integration) in about 3 s; coverage of `app/` **95 %** ([docs/test-output.txt](docs/test-output.txt)) |
+| `make lint` | ruff: all checks passed; shellcheck: no findings |
+| `make lockout` | **13/13** steps passed on a disposable server ([docs/lockout-output.txt](docs/lockout-output.txt)) |
+| `make unit` with the server stopped | 100 passed; the integration tests stop at once with one message and exit code 3 |
+| two copies side by side (`MARIADB_CONTAINER`/`MARIADB_PORT`) | `make test` passed in the second copy while the first was running |
 
-Test files ([tests/](tests/)), all connecting to the real server:
+Coverage per module (`make test`): `actions.py` 100 %, `admin.py` 91 %, `database.py` 96 %, `demo.py` 90 %,
+`menu.py` 93 %, `sqlrunner.py` 97 %. The uncovered lines are mostly `if __name__ == "__main__"` entry points
+and error branches for a missing Docker binary.
+
+**Continuous integration** ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every push to
+`main` on GitHub-hosted Ubuntu runners: install dependencies, `make lint`, start the pinned MariaDB image
+with the same `docker-compose.yml` (TLS, `unix_socket` root via `docker exec`, the X509 harness - nothing is
+mocked or skipped), `make test`, `make demo`, `make lockout`. The `canary` job repeats the tests on the floating
+`13.1` tag and may fail without failing the workflow. Example of a complete green run, for commit `b3e8bf0`:
+<https://github.com/alexkhovrenkov/test_project_DB/actions/runs/38141173223> - lint clean, 260 passed, coverage
+95 %, role demo 24/24, 108 + 373 steps, lockout 13/13 (identical numbers in the canary job). The badge at the
+top shows the status of the latest commit. CI also caught a real problem: the run for the A2 commit failed
+once, which led to finding 12.
+
+Test files:
 
 | File | Covers |
 |---|---|
-| [test_permissions.py](tests/test_permissions.py) | the 4×6 role matrix with exact error codes, view isolation, column privilege, DENY beats later GRANT, SHOW GRANTS/SHOW TABLES visibility, JSON storage, injection payloads |
-| [test_deny_semantics.py](tests/test_deny_semantics.py) | GRANT/DENY conflicts (levels, order), nested roles, column-level DENY, `REVOKE DENY` (exact level, plain REVOKE, REVOKE ALL), SET ROLE NONE, definer views, wildcard names, stale denies, PUBLIC lockout and recovery |
-| [test_authentication.py](tests/test_authentication.py) | ED25519 for all accounts, wrong/empty/foreign passwords, no enumeration, stolen public key, no clear-text password, lock and expiry |
-| [test_tls.py](tests/test_tls.py) | verified connection and protocol version, wrong CA, host-name mismatch, plaintext refused (demo user and administrator), verification-off lesson, PyMySQL's unverified default |
-| [test_experiments.py](tests/test_experiments.py) | runs all 16 `.sql` tutorial files; any mismatching step fails with the step-by-step output |
-| [test_repository_security.py](tests/test_repository_security.py) | key files owner-only, no secrets/keys tracked, `.env` and keys ignored, no interpolated password in SQL/shell, no string-built SQL in `app/`, TLS verification on, port on loopback |
+| [unit/test_sqlrunner.py](tests/unit/test_sqlrunner.py) | `parse()` on valid and malformed files, every `judge()` expectation kind, output rendering |
+| [unit/test_security_helpers.py](tests/unit/test_security_helpers.py) | `socket_sql` escaping (a hostile value stays one literal, on stdin, never on argv, never echoed), generated passwords vs the policy, input validation |
+| [unit/test_repository_security.py](tests/unit/test_repository_security.py) | key files owner-only, no secrets/keys tracked, `.env` and keys ignored, no interpolated password in SQL/shell, no string-built SQL in `app/`, TLS verification on, port on loopback |
+| [integration/test_permissions.py](tests/integration/test_permissions.py) | the 4×6 role matrix with exact error codes, view isolation, column privilege, DENY beats later GRANT, SHOW GRANTS/SHOW TABLES visibility, JSON storage, injection payloads |
+| [integration/test_deny_semantics.py](tests/integration/test_deny_semantics.py) | GRANT/DENY conflicts, nested roles, column-level DENY, `REVOKE DENY`, SET ROLE NONE, definer views, wildcard names, stale denies, PUBLIC lockout, routine-level DENY |
+| [integration/test_account_model.py](tests/integration/test_account_model.py) | no live password in any file or in the container, root only via the socket, harness refused without its certificate, the enumeration oracle (finding 12) |
+| [integration/test_authentication.py](tests/integration/test_authentication.py) | ED25519 for all demo accounts, wrong/empty/foreign passwords, no enumeration, stolen public key, lock and expiry |
+| [integration/test_password_policy.py](tests/integration/test_password_policy.py) | the validation and reuse plugins and findings 9-11 |
+| [integration/test_tls.py](tests/integration/test_tls.py) | verified connection and protocol version, wrong CA, host-name mismatch, plaintext refused, verification-off lesson, PyMySQL's unverified default |
+| [integration/test_experiments.py](tests/integration/test_experiments.py) | runs all 18 `.sql` tutorial and experiment files; any mismatching step fails with the step-by-step output |
+| [integration/test_tools.py](tests/integration/test_tools.py) | the role demo, the runner's command line, the interactive menu and `set-password`, driven with typed input |
 
-Tests use random throw-away names (`t_lab_<hex>`) and clean up; after a run the server is as `sql/` left it.
+Tests use random throw-away names (`t_lab_<hex>`, `t_pw_<hex>`) and clean up; after a run the server is as
+`sql/` left it.
 
-**Do the tests actually test?** Mutation checks, run for real: with the professor's DENY revoked
-(`REVOKE DENY SELECT ON university.financial_records FROM professor_role`) **8 tests failed**
-(`test_role_matrix[professor-financial]`, `test_deny_beats_a_later_table_level_grant`, the JOIN test, the
-`SHOW TABLES` test, the SHOW GRANTS visibility test, the `mysql.global_priv` JSON test, and experiments 6
-and 10); restoring it gave 115/115 again (the suite had 115 tests at that point).
-With `certs/server-key.pem` set to mode 644 the key-permission test failed; `make certs` repaired it.
-
-**Continuous integration:** [.github/workflows/ci.yml](.github/workflows/ci.yml) installs dependencies,
-runs `shellcheck`, starts the same Docker image (TLS and ED25519 included - GitHub-hosted runners have
-Docker and quay.io is public, so **nothing is skipped or mocked**), runs `make test` and `make demo`, and
-fails on any failing test. Job `test` pins the image digest; job `canary` uses the floating tag and may fail
-without failing the workflow. *The workflow file is validated (YAML parses, the commands it runs were run
-locally including on x86_64), but it has not yet been executed on GitHub - that requires pushing this branch.*
+**Do the tests actually test?** Mutation checks on the final suite, run for real: with the professor's DENY
+revoked (`REVOKE DENY SELECT ON university.financial_records FROM professor_role`) **11 of 260 tests failed** -
+the professor/financial cell of the role matrix, the later-GRANT test, the JOIN test, the `SHOW TABLES` test,
+the SHOW GRANTS visibility test, the `mysql.global_priv` JSON test, experiments 6 and 10, the professor's role
+demo (twice) and the interactive-menu test; restoring the DENY gave 260 passed again. With
+`certs/server-key.pem` set to mode 644 the key-permission unit test failed; `make certs` set it back to 600.
 
 ## 14. Reproducing everything
 
 | To reproduce | Command | Look for |
 |---|---|---|
-| The whole project from nothing | `make clean && make demo` | exit 0; last line before the closing message: `TOTAL: 325 steps passed, 0 failed` (experiments) |
+| The whole project from nothing | `make clean && make demo` | exit 0; `TOTAL: 108 steps passed, 0 failed` (examples) and `TOTAL: 373 steps passed, 0 failed` (experiments 1-13) |
 | Role matrix (section 6) | `make roles` | `Role demo: 24/24 actions behaved as expected.` |
 | Tutorial (section 10) | `make examples` | `TOTAL: 108 steps passed, 0 failed` |
-| All experiments / one experiment | `make experiments` / `.venv/bin/python app/sqlrunner.py experiments/08_*.sql` | `... N passed, 0 failed` |
-| ED25519 attacks (section 8) | `.venv/bin/python -m pytest tests/test_authentication.py -v` | all PASSED |
-| TLS attacks (section 9) | `.venv/bin/python -m pytest tests/test_tls.py -v` | all PASSED |
-| DENY semantics (section 7) | `.venv/bin/python -m pytest tests/test_deny_semantics.py -v` | all PASSED |
-| Everything, verbosely | `.venv/bin/python -m pytest -v` | 117 passed |
-| Password-free account model (section 8) | `.venv/bin/python -m pytest tests/test_account_model.py -v` | all PASSED |
+| All experiments / one experiment | `make experiments` / `.venv/bin/python app/sqlrunner.py experiments/08_deny_scope_role_vs_user.sql` | `... N passed, 0 failed` |
+| PUBLIC hard lockout (finding 8) | `make lockout` | `-> 14_public_lockout.sh: 13 passed, 0 failed` |
+| Password policy (findings 9-11) | `.venv/bin/python -m pytest tests/integration/test_password_policy.py -v` | all PASSED |
+| ED25519 attacks (section 8) | `.venv/bin/python -m pytest tests/integration/test_authentication.py -v` | all PASSED |
+| TLS attacks (section 9) | `.venv/bin/python -m pytest tests/integration/test_tls.py -v` | all PASSED |
+| DENY semantics (section 7) | `.venv/bin/python -m pytest tests/integration/test_deny_semantics.py -v` | all PASSED |
+| Everything, verbosely | `.venv/bin/python -m pytest -v` | 260 passed |
+| Server-free part | `make unit` | 100 passed |
+| Lint | `make lint` | `lint: no findings` |
+| Password-free account model (section 8) | `.venv/bin/python -m pytest tests/integration/test_account_model.py -v` | all PASSED |
 | By hand, as a role | `make set-password USER=smith_professor`, then `make sql USER=smith_professor` | section 7 |
 | Interactively | `make set-password USER=…`, then `.venv/bin/python app/menu.py` | pick a role, type its password, try all actions |
 
@@ -723,7 +761,8 @@ locally including on x86_64), but it has not yet been executed on GitHub - that 
 **Done in this repository** (and checked by tests where marked 🧪):
 
 * 🧪 TLS private keys are mode `600` on the host and inside the container (earlier versions used `644`).
-* 🧪 No account password in any file (section 8): root is `unix_socket`-only, the demo accounts start locked,
+* 🧪 No account password in any file (section 8): root logs in only via `unix_socket` (its ed25519 alternative is an
+  unusable key), the demo accounts start locked,
   automated runs keep their passwords in memory, people type theirs; `.env` holds only non-secret settings.
 * 🧪 No `root@'%'`: root cannot be reached over the network at all.
 * 🧪 The administrator of a run is a short-lived, least-privilege account that also needs a client
@@ -736,7 +775,10 @@ locally including on x86_64), but it has not yet been executed on GitHub - that 
 * 🧪 The database port is published on `127.0.0.1` only, not on the network.
 * `my_grades` runs as a locked, localhost-only, three-table read-only definer instead of root.
 * The admin role is limited to `university.*` (no `mysql.*`, no account management).
-* No debug flags are enabled; nothing sensitive is logged (the runner prints `{{pw}}`, not the value).
+* 🧪 Passwords set or proposed are never printed: the runner shows `{{pw}}`, not the value, and the socket client
+  runs with `--skip-print-query-on-error`, so a refused `set-password` does not echo the password back.
+* 🧪 Password validation and reuse plugins (section 8); weak, reused and pre-computed credentials are refused.
+* No debug flags are enabled.
 
 **Still unprotected / limitations** - honest list:
 
@@ -784,18 +826,21 @@ locally including on x86_64), but it has not yet been executed on GitHub - that 
 
 ```
 ├── README.md                    this document
-├── Makefile                     make demo | test | roles | examples | experiments | set-password | sql | shell | down | reset | clean
-├── docker-compose.yml           MariaDB 13.1 with TLS; key copied in with owner-only permissions
+├── Makefile                     make demo | test | unit | lint | roles | examples | experiments | lockout |
+│                                     set-password | sql | shell | down | reset | clean
+├── docker-compose.yml           MariaDB 13.1 (pinned build) with TLS; no passwords; key copied in owner-only
 ├── .env.example                 optional non-secret settings (port, container name, image) - no passwords
-├── requirements.txt             pymysql[ed25519], python-dotenv        requirements-dev.txt  + pytest
-├── .github/workflows/ci.yml     CI: shellcheck, MariaDB 13.1 container, pytest, demo
+├── requirements.txt             pymysql[ed25519], python-dotenv
+├── requirements-dev.txt         + pytest, pytest-cov, ruff
+├── ruff.toml, pytest.ini        lint and test configuration
+├── .github/workflows/ci.yml     CI: lint, MariaDB 13.1 container, tests + coverage, demo, lockout; canary job
 ├── sql/                         run by the image on first start, in this order:
 │   ├── 01_schema.sql            tables
 │   ├── 02_data.sql              fake data
 │   ├── 03_roles.sql             roles, GRANT, DENY, the my_grades view and its definer
 │   ├── 04_users.sql             ED25519 users, created LOCKED with an unusable key (no password)
 │   ├── 05_password_policy.sql   simple_password_check + password_reuse_check
-│   └── 06_lockdown.sh           root -> unix_socket; removes the image's healthcheck password file
+│   └── 06_lockdown.sh           root -> unix_socket OR unusable key; removes the image's healthcheck password file
 ├── scripts/
 │   └── generate_certs.sh        CA, server and client certificates, keys mode 600
 ├── app/
@@ -805,25 +850,26 @@ locally including on x86_64), but it has not yet been executed on GitHub - that 
 │   ├── demo.py                  six actions x four roles, expected/actual/PASS-FAIL
 │   ├── menu.py                  interactive version
 │   └── sqlrunner.py             runs annotated .sql files as different users
-├── examples/                    5 standalone SQL lessons (+ README on using your own client)
-├── experiments/                 11 advanced security experiments
-├── tests/                       pytest suite against the real server (117 tests)
+├── examples/                    5 standalone SQL lessons + README with a 10-minute "Start here"
+├── experiments/                 13 annotated SQL experiments + 14_public_lockout.sh (disposable server)
+├── tests/
+│   ├── unit/                    100 tests, no server needed
+│   └── integration/             160 tests against the real server
 └── docs/
-    ├── demo-output.txt          complete output of one clean `make demo`
-    └── test-output.txt          output of `pytest -v` from the same clean run
+    ├── demo-output.txt          complete output of `make demo` from a fresh clone
+    ├── test-output.txt          `pytest -v` with coverage, same run
+    ├── lockout-output.txt       `make lockout`, same run
+    └── upstream-report-nested-role-deny.md   bug report for finding 1, prepared (not filed)
 ```
 
 ## 18. Team
 
-**Not supplied.** The repository does not record the team members, and none have been invented. Please fill in:
-
-| Name | Role in the project |
+| Name | Contribution |
 |---|---|
-| _(name - to be supplied)_ | _(e.g. schema and roles / authentication and TLS / experiments / tests and CI / documentation)_ |
-| _(name - to be supplied)_ | _(...)_ |
-
-The Git history currently shows a single "first commit" by `Julymichy.14`; contributions per member cannot be
-derived from it.
+| Alexander Vicente Lopez Yanes | Test scripts |
+| Maha Mahdi | Emotional support & AI tests |
+| Alexei Khovrenkov | Repository, README, Docker management |
+| Julissa Michelle Barahona Nunez | App files and SQL |
 
 ## 19. References
 
