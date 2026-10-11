@@ -139,6 +139,26 @@ Every step prints `PASS`/`FAIL`; any failure makes `make` exit non-zero.
 | `python app/menu.py` (after `make set-password`) | interactive menu: log in as any role and try actions |
 | `make down` / `make reset` / `make clean` | stop / stop and delete data / also delete certs and venv |
 
+**Windows, or without `make`.** On Windows the simplest route is **WSL** (Ubuntu) with Docker Desktop's WSL
+integration turned on: clone the repository inside WSL and use the `make` commands above unchanged. Without
+`make` (any system), the same steps by hand - run the first line in WSL or Git Bash, because it is a bash
+script that needs `openssl`:
+
+```bash
+bash scripts/generate_certs.sh                       # once: CA, server and client certificates
+docker compose up -d --wait                          # start MariaDB 13.1 (first start: creates everything)
+python -m venv .venv                                 # python3 on macOS/Linux
+.venv/bin/python -m pip install -r requirements-dev.txt     # PowerShell: .venv\Scripts\python -m pip ...
+.venv/bin/python app/demo.py                         # role demo
+.venv/bin/python app/sqlrunner.py examples experiments      # tutorial + experiments
+.venv/bin/python -m pytest                           # all tests
+.venv/bin/python app/admin.py set-password smith_professor  # then:
+docker compose exec mariadb mariadb -u smith_professor -p university
+```
+
+We ran exactly this sequence (with `python3`) in a fresh clone on macOS: role demo 24/24, every SQL step
+passed, all tests passed. We had no Windows machine, so the WSL / PowerShell variants are untested.
+
 Check the server version (`docker compose exec mariadb ...` works whatever the container is called):
 ```bash
 docker compose exec mariadb mariadbd --version
