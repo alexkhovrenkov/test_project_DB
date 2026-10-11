@@ -261,6 +261,7 @@ and **each one reproduced on 13.1.2** by an experiment or test:
 | A denied table disappears from `SHOW TABLES` / `information_schema` | [example 2](examples/02_deny.sql), experiment 10 |
 | DENY lines are shown in `SHOW GRANTS` only to accounts that can read `mysql.*` | experiment 10, `test_permissions.py` |
 | Stored in the `denies` key of `mysql.global_priv` | `test_deny_is_stored_in_global_priv_as_json` |
+| Routine denies need the type (`ON PROCEDURE` / `ON FUNCTION`; without it: error 1144), block `CALL`/function calls with 1370, hide the routine from `INFORMATION_SCHEMA.ROUTINES`, and disappear when the routine is dropped | experiment 13, `test_routine_deny_*` |
 
 Real `SHOW GRANTS` as an administrator (`make shell`):
 ```
@@ -471,6 +472,7 @@ Step 3  user: exp_viewer  (active role: none)
 | 10 | [metadata_visibility](experiments/10_metadata_visibility.sql) | What can a denied user still learn? | Listings hidden; error codes leak existence (finding 5) |
 | 11 | [database_name_patterns](experiments/11_database_name_patterns.sql) | `_`/`%` wildcards in GRANT and DENY | Unescaped `_` leaks a grant; pattern DENY ignored (finding 6) |
 | 12 | [password_policy](experiments/12_password_policy.sql) | Do the validation and reuse plugins guard ED25519 accounts? What gets through? | Weak and reused passwords refused (1819/1396/1290); refused passwords recorded, history outlives `DROP USER`, shared passwords allowed (findings 9-11) |
+| 13 | [routine_deny](experiments/13_routine_deny.sql) | `DENY EXECUTE ON PROCEDURE/FUNCTION` inside a schema-wide `GRANT EXECUTE` | Calls refused (1370), routine hidden from `INFORMATION_SCHEMA.ROUTINES`, type required (1144), `DROP` removes the deny and re-creating does not restore it |
 
 And five standalone tutorial lessons in [examples/](examples/) (roles, DENY, inheritance, column privileges,
 ED25519 failures) - see [examples/README.md](examples/README.md) for how to follow them with any SQL client.
@@ -538,6 +540,17 @@ experiment *and* asserted by a test.
     (the policy never re-checks them: `my_grades_owner` and the image's `mariadb.sys` keep an empty password -
     both are locked, which is why locking matters). (experiment 12)
 
+Routine-level DENY (experiment 13) behaved exactly as documented. Real excerpt:
+```
+Step 7  user: exp_u  (active role: none)
+    SQL      SELECT exp_lab.salary_of(1);
+    Expected error 1370 salary_of
+    Actual   error 1370: execute command denied to user 'exp_u'@'%' for routine 'exp_lab.salary_of'
+    Result   PASS
+```
+Note the contrast with finding 7: a routine's DENY is removed by `DROP FUNCTION`/`DROP PROCEDURE` (so a
+re-created routine is open again), while a database-level DENY survives `DROP DATABASE`.
+
 Other results worth knowing: a delegated administrator with `GRANT OPTION` cannot hand out, or unlock for
 themselves, a privilege they are DENIED (experiment 5); `SELECT *` with only some column grants fails at
 table level (1142), referencing a denied column fails at column level (1143); `LOAD_FILE` without the FILE
@@ -563,6 +576,7 @@ privilege silently returns `NULL` instead of an error.
 | User grants themselves access / grants to PUBLIC | GRANT OPTION rules | experiment 5 | 1142 |
 | Delegated admin unlocks their own DENY | DENY needs the privilege to lift | experiment 5 | 1142 |
 | Create accounts, read `mysql.*`, change root's password | global privileges absent | experiments 5, 6 | 1227 / 1142 / 1044 |
+| User calls a stored procedure/function inside a schema they may execute | routine-level DENY | `test_routine_deny_beats_database_grant_execute` | 1370 |
 | Weak password set for an account | `simple_password_check` | `test_weak_passwords_are_refused` | 1819 |
 | Old password set again | `password_reuse_check` | `test_reuse_is_refused_by_set_password_with_1819` | 1819 / 1396 |
 | Bypass the policy with a pre-computed key | `strict_password_validation` | `test_precomputed_public_key_is_refused...` | 1290 |

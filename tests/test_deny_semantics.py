@@ -288,3 +288,58 @@ def test_public_deny_locks_out_the_administrator_until_revoked(lab, harness):
         assert read(again, lab.db)
     finally:
         again.close()
+
+
+# ---- 6. Routine-level DENY ---------------------------------------------------------
+
+ROUTINE_DENIED = 1370   # "execute command denied to user ... for routine ..."
+ILLEGAL_GRANT = 1144
+
+
+@pytest.fixture
+def routines(lab):
+    lab.run(f"CREATE PROCEDURE {lab.db}.p() SELECT 'proc ran' AS result")
+    lab.run(f"CREATE FUNCTION {lab.db}.f() RETURNS INT DETERMINISTIC RETURN 42")
+    lab.run(f"CREATE PROCEDURE {lab.db}.q() SELECT 'other proc' AS result")
+    user = lab.account("u")
+    lab.run(f"GRANT EXECUTE ON {lab.db}.* TO {user[0]}@'%'")
+    return lab, user
+
+
+def test_routine_deny_beats_database_grant_execute(routines):
+    lab, user = routines
+    lab.run(f"DENY EXECUTE ON PROCEDURE {lab.db}.p TO {user[0]}@'%'")
+    lab.run(f"DENY EXECUTE ON FUNCTION {lab.db}.f TO {user[0]}@'%'")
+    with lab.session(user) as session:
+        assert error_code(lambda: run_query(session, f"CALL {lab.db}.p()")) == ROUTINE_DENIED
+        assert error_code(lambda: run_query(session, f"SELECT {lab.db}.f()")) == ROUTINE_DENIED
+        assert run_query(session, f"CALL {lab.db}.q()") == (("other proc",),)
+        listed = {row[0] for row in run_query(
+            session, "SELECT routine_name FROM information_schema.routines WHERE routine_schema = %s", (lab.db,))}
+        assert listed == {"q"}
+
+
+def test_routine_deny_requires_the_routine_type(routines):
+    lab, user = routines
+    assert error_code(lambda: lab.run(f"DENY EXECUTE ON {lab.db}.p TO {user[0]}@'%'")) == ILLEGAL_GRANT
+    lab.run(f"DENY EXECUTE ON FUNCTION {lab.db}.f TO {user[0]}@'%'")
+    assert error_code(lambda: lab.run(f"REVOKE DENY EXECUTE ON {lab.db}.f FROM {user[0]}@'%'")) == ILLEGAL_GRANT
+
+
+def test_revoke_deny_at_routine_level_restores_execute(routines):
+    lab, user = routines
+    lab.run(f"DENY EXECUTE ON PROCEDURE {lab.db}.p TO {user[0]}@'%'")
+    with lab.session(user) as session:
+        assert error_code(lambda: run_query(session, f"CALL {lab.db}.p()")) == ROUTINE_DENIED
+        lab.run(f"REVOKE DENY EXECUTE ON PROCEDURE {lab.db}.p FROM {user[0]}@'%'")
+        assert run_query(session, f"CALL {lab.db}.p()") == (("proc ran",),)
+
+
+def test_dropping_a_routine_removes_its_deny_and_recreating_it_does_not_restore_it(routines):
+    lab, user = routines
+    lab.run(f"DENY EXECUTE ON FUNCTION {lab.db}.f TO {user[0]}@'%'")
+    lab.run(f"DROP FUNCTION {lab.db}.f")
+    assert not any("FUNCTION" in row[0] for row in lab.run(f"SHOW GRANTS FOR {user[0]}@'%'"))
+    lab.run(f"CREATE FUNCTION {lab.db}.f() RETURNS INT DETERMINISTIC RETURN 42")
+    with lab.session(user) as session:
+        assert run_query(session, f"SELECT {lab.db}.f()") == ((42,),)
