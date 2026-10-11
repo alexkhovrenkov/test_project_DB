@@ -41,6 +41,14 @@ CREATE USER exp_hash@'%' IDENTIFIED VIA ed25519 USING 'lEiAPNNMP1kq0dRsguIBKo/em
 -- @why A strong password (random for this run) is accepted.
 CREATE USER exp_pw_{{run}}@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
 
+-- @why FINDING: a WEAK password set with ALTER USER is refused too - but reported as the generic 1396, not 1819 ...
+-- @expect error 1396
+ALTER USER exp_pw_{{run}}@'%' IDENTIFIED VIA ed25519 USING PASSWORD('Weak-pass');
+
+-- @why ... the reason (simple_password_check) is only in the warnings.
+-- @expect contains simple_password_check
+SHOW WARNINGS;
+
 -- ===== Reused passwords =====
 -- @why Setting the same password again with SET PASSWORD: refused by password_reuse_check, error 1819. The account keeps its ed25519 plugin.
 -- @expect error 1819 password_reuse_check

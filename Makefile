@@ -66,7 +66,7 @@ demo: roles examples experiments
 	@echo "Demo finished: every step above ended in PASS. Run 'make test' for the pytest suite."
 
 test: setup
-	$(PYTHON) -m pytest
+	$(PYTHON) -m pytest --cov=app --cov-report=term-missing
 
 unit: venv
 	$(PYTHON) -m pytest tests/unit

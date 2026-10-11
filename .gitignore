@@ -8,6 +8,8 @@ certs/
 .venv/
 __pycache__/
 .pytest_cache/
+.ruff_cache/
+.coverage
 
 # Local output captured by "make demo | tee"
 demo-output.txt

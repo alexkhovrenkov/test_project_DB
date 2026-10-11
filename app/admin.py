@@ -72,8 +72,10 @@ def socket_sql(sql, params=(), container=CONTAINER):
     function). As with PyMySQL, a literal % in `sql` is written %%.
     """
     sql = sql % tuple(escape_item(value, "utf8mb4") for value in params)
+    # --skip-print-query-on-error: on an error the client would otherwise echo the
+    # whole statement - including a password literal - into its error output.
     command = [DOCKER, "exec", "-i", container, "mariadb", "--protocol=socket", "--user=root",
-               "--batch", "--skip-column-names"]
+               "--batch", "--skip-column-names", "--skip-print-query-on-error"]
     try:
         result = subprocess.run(command, input=sql, capture_output=True, text=True, check=False)
     except FileNotFoundError:
@@ -93,14 +95,17 @@ class Harness:
 
     def __enter__(self):
         assert HARNESS_NAME.match(self.name)
-        # Leftovers of runs that were killed before they could clean up.
-        for stale in socket_sql("SELECT User FROM mysql.global_priv WHERE User LIKE 'harness\\_%%'"):
+        # Leftovers of runs that were killed before they could clean up: harness
+        # accounts without any open session. (A run in progress keeps its session.)
+        for stale in socket_sql("SELECT User FROM mysql.global_priv WHERE User LIKE 'harness\\_%%' "
+                                "AND User NOT IN (SELECT USER FROM information_schema.PROCESSLIST)"):
             if HARNESS_NAME.match(stale):
                 socket_sql(f"DROP USER IF EXISTS `{stale}`@'%%'")
         socket_sql(f"CREATE USER `{self.name}`@'%%' IDENTIFIED VIA ed25519 USING PASSWORD(%s) REQUIRE X509",
                    (self.password,))
         socket_sql(f"GRANT {HARNESS_PRIVILEGES} ON *.* TO `{self.name}`@'%%' WITH GRANT OPTION")
         remember_password(self.name, self.password)
+        self._connection = self.connect()   # an open session marks this harness as "in use"
         return self
 
     def __exit__(self, *exc):
@@ -137,8 +142,11 @@ def set_password(user):
     first = getpass.getpass(f"New password for {user}: ")
     if first != getpass.getpass("Repeat it: "):
         raise SystemExit("The two passwords differ; nothing was changed.")
+    # SET PASSWORD keeps the account's ed25519 plugin and reports a policy violation as
+    # 1819 with the plugin's name (ALTER USER would say only "1396 Operation failed",
+    # finding 10). If it fails, the client stops and the account stays locked.
     try:
-        socket_sql(f"ALTER USER `{user}`@'%%' IDENTIFIED VIA ed25519 USING PASSWORD(%s) ACCOUNT UNLOCK",
+        socket_sql(f"SET PASSWORD FOR `{user}`@'%%' = PASSWORD(%s); ALTER USER `{user}`@'%%' ACCOUNT UNLOCK;",
                    (first,))
     except SocketSQLError as error:
         raise SystemExit(f"MariaDB refused: {error}") from None

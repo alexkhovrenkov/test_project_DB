@@ -378,7 +378,7 @@ Step 11  user: dba (harness_fcbbec84)  (active role: none)
 | `IDENTIFIED VIA ed25519` without a password (= empty password) | refused, **1819** |
 | a pre-computed ed25519 public key (`USING '<key>'`) | refused, **1290** (`strict_password_validation`) |
 | the same password again with `SET PASSWORD` | refused, **1819** (`password_reuse_check`) |
-| the same password again with `ALTER USER` | refused, but as **1396**; the reason is only in `SHOW WARNINGS` (finding 10) |
+| a weak or reused password with `ALTER USER` | refused, but as **1396**; the reason is only in `SHOW WARNINGS` (finding 10) |
 | the same password for a *different* account; a password containing the account name | **accepted** (finding 11) |
 
 **ED25519 login:** the client says who it is; the server sends a random challenge; the client recomputes the
@@ -544,9 +544,11 @@ experiment *and* asserted by a test.
    password is refused as reused. The history is never cleaned for dropped accounts. The plugin documentation
    does not mention either behaviour. (experiment 12, `test_a_refused_password_is_still_recorded_as_used`,
    `test_reuse_history_survives_drop_user`)
-10. **The same policy violation has two error codes.** Reuse through `SET PASSWORD` is error 1819; through
-    `ALTER USER ... IDENTIFIED VIA ed25519 USING PASSWORD(...)` it is the generic **1396** "Operation ALTER USER
-    failed", with the 1819 only in `SHOW WARNINGS`. Code that looks for 1819 misses it. (experiment 12)
+10. **The same policy violation has two error codes.** A weak or reused password set with `SET PASSWORD` is
+    error 1819 naming the plugin; set with `ALTER USER ... IDENTIFIED VIA ed25519 USING PASSWORD(...)` it is
+    the generic **1396** "Operation ALTER USER failed", with the 1819 only in `SHOW WARNINGS`. Code that looks
+    for 1819 misses it; `make set-password` therefore uses `SET PASSWORD` (then unlocks with `ALTER USER`).
+    (experiment 12)
 11. **What the password policy does not catch:** two accounts sharing a password (reuse is per account), a
     password containing the account name, and credentials that existed before the plugins were installed
     (the policy never re-checks them: `my_grades_owner` and the image's `mariadb.sys` keep an empty password -

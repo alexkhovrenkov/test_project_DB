@@ -47,6 +47,7 @@ def test_socket_sql_uses_socket_root_in_the_configured_container(fake_run):
     command, stdin = fake_run.calls[0]
     assert command[:4] == [admin.DOCKER, "exec", "-i", admin.CONTAINER]
     assert "--protocol=socket" in command and "--user=root" in command
+    assert "--skip-print-query-on-error" in command   # never echo a statement (and its password) on error
     assert not [part for part in command if part.startswith(("-p", "--password"))]
     assert stdin == "SELECT 1"
 
