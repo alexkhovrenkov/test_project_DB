@@ -11,18 +11,13 @@ Usage:
 
 import pymysql
 
-from database import ACCOUNTS, connect_as, run_query
+from actions import READ_ACTIONS, update_grade
+from database import ACCOUNTS, ConfigError, connect_as, run_query
 
 ROLES = list(ACCOUNTS)   # ["student", "professor", "finance", "admin"]
 
-# Menu number -> (text shown in the menu, SQL to run)
-READ_ACTIONS = {
-    "1": ("View courses",               "SELECT code, title, credits, professor FROM courses"),
-    "2": ("View my grades",             "SELECT code, title, grade FROM my_grades"),
-    "3": ("View students",              "SELECT student_id, first_name, last_name, email FROM students"),
-    "4": ("View all grades",            "SELECT grade_id, student_id, course_id, grade FROM grades"),
-    "6": ("View financial records",     "SELECT student_id, tuition_due, amount_paid, bank_iban FROM financial_records"),
-}
+# Menu number -> key in actions.READ_ACTIONS
+READ_MENU = {"1": "courses", "2": "my_grades", "3": "students", "4": "grades", "6": "financial"}
 
 
 def print_rows(rows):
@@ -49,20 +44,16 @@ def change_grade(connection):
     """Ask for a grade id and a new grade, then try the UPDATE."""
     grade_id = input("  Grade id to change (1-7): ").strip()
     new_grade = input("  New grade (e.g. 1.7): ").strip()
-    # The user's input goes in as PARAMETERS (%s), never pasted into the SQL
-    # text. That is what prevents SQL injection.
-    run_query(connection,
-              "UPDATE grades SET grade = %s WHERE grade_id = %s",
-              (new_grade, grade_id))
+    update_grade(connection, grade_id, new_grade)   # validated, then sent as parameters
     print("  UPDATE accepted by MariaDB.")
 
 
 def show_menu(role):
     print(f"\n--- Logged in as {role} ---")
     for number in ("1", "2", "3", "4"):
-        print(f"  {number}. {READ_ACTIONS[number][0]}")
+        print(f"  {number}. {READ_ACTIONS[READ_MENU[number]][0]}")
     print("  5. Change a grade")
-    print(f"  6. {READ_ACTIONS['6'][0]}")
+    print(f"  6. {READ_ACTIONS['financial'][0]}")
     print("  7. Switch user")
     print("  0. Quit")
 
@@ -84,14 +75,16 @@ def main():
             continue
 
         try:
-            if choice in READ_ACTIONS:
-                description, sql = READ_ACTIONS[choice]
+            if choice in READ_MENU:
+                description, sql = READ_ACTIONS[READ_MENU[choice]]
                 print(f"\n{description}:")
                 print_rows(run_query(connection, sql))
             elif choice == "5":
                 change_grade(connection)
             else:
                 print("Unknown choice.")
+        except ValueError as error:
+            print(f"\n  Invalid input: {error}")
         except pymysql.MySQLError as error:
             # This is MariaDB saying no - we only print what it answered.
             # Error 1142/1143 = no permission. Other codes = e.g. invalid data.
@@ -103,4 +96,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ConfigError as error:
+        raise SystemExit(f"ERROR: {error}")

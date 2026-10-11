@@ -1,41 +1,60 @@
 # Starts one MariaDB 13.1 server in a Docker container.
 #
-#   docker compose up -d --wait     start it (and wait until it is healthy)
-#   docker compose down -v          stop it AND delete the data (full reset)
+#   make setup / make demo        (recommended: does everything below for you)
+#   docker compose up -d --wait   start it (and wait until it is healthy)
+#   docker compose down -v        stop it AND delete the data (full reset)
 #
 # Values like ${MARIADB_ROOT_PASSWORD} are read from the .env file.
 
 services:
   mariadb:
     # MariaDB 13.1 is needed because it is the first version with DENY.
-    image: quay.io/mariadb-foundation/mariadb-devel:13.1
+    # Override with MARIADB_IMAGE in .env to pin a specific digest.
+    image: ${MARIADB_IMAGE:-quay.io/mariadb-foundation/mariadb-devel:13.1}
     container_name: university-db
 
     environment:
-      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?run "make env" first}
       # Read by sql/04_users.sh when the demo users are created.
-      STUDENT_PASSWORD: ${STUDENT_PASSWORD}
-      PROFESSOR_PASSWORD: ${PROFESSOR_PASSWORD}
-      FINANCE_PASSWORD: ${FINANCE_PASSWORD}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      STUDENT_PASSWORD: ${STUDENT_PASSWORD:?run "make env" first}
+      PROFESSOR_PASSWORD: ${PROFESSOR_PASSWORD:?run "make env" first}
+      FINANCE_PASSWORD: ${FINANCE_PASSWORD:?run "make env" first}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?run "make env" first}
 
-    # Make the container's port 3306 reachable as localhost:3306 on our computer.
+    # Only reachable from this computer (127.0.0.1), never from the network.
     ports:
-      - "3306:3306"
+      - "127.0.0.1:${MARIADB_PORT:-3306}:3306"
 
     # The image runs every file in /docker-entrypoint-initdb.d (in alphabetical
     # order) the FIRST time the database is created. That is how our schema,
     # data, roles and users get loaded automatically.
     volumes:
       - ./sql:/docker-entrypoint-initdb.d:ro
-      # Certificates created by scripts/generate_certs.sh
-      - ./certs:/etc/mysql/certs:ro
+      # Certificates created by scripts/generate_certs.sh. Mounted read-only
+      # at a staging path; the entrypoint below copies them into place.
+      - ./certs:/certs-src:ro
+
+    # MariaDB runs as the unprivileged user "mysql" (uid 999), but the key on
+    # the host is only readable by YOU (mode 600). So, while still root inside
+    # the container, copy the key to a container-private directory, owned by
+    # mysql with mode 600, and only then hand over to the normal entrypoint.
+    # Result: the private key is never world-readable, on the host or inside.
+    entrypoint:
+      - bash
+      - -ec
+      - |
+        install -d -m 0755 /etc/mysql/tls
+        install -m 0644 -o mysql -g mysql /certs-src/ca.pem /certs-src/server-cert.pem /etc/mysql/tls/
+        install -m 0600 -o mysql -g mysql /certs-src/server-key.pem /etc/mysql/tls/server-key.pem
+        exec docker-entrypoint.sh "$$@"
+      - entrypoint
 
     # Extra server options = TLS configuration.
     command:
-      - --ssl-cert=/etc/mysql/certs/server-cert.pem   # the server's certificate
-      - --ssl-key=/etc/mysql/certs/server-key.pem     # its private key
-      - --ssl-ca=/etc/mysql/certs/ca.pem              # the CA that signed it
+      - --ssl-cert=/etc/mysql/tls/server-cert.pem   # the server's certificate
+      - --ssl-key=/etc/mysql/tls/server-key.pem     # its private key
+      - --ssl-ca=/etc/mysql/tls/ca.pem              # the CA that signed it
+      - --tls-version=TLSv1.2,TLSv1.3               # no legacy protocol versions
       # Refuse every network connection that does not use TLS.
       # (Connections through the local Unix socket inside the container are
       #  still allowed; that is how "docker exec ... mariadb" works.)
@@ -46,4 +65,4 @@ services:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 3s
       timeout: 5s
-      retries: 20
+      retries: 40

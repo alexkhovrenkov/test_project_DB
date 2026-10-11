@@ -1,2 +1,2 @@
 pymysql[ed25519]==1.2.3
-python-dotenv
+python-dotenv==1.2.4

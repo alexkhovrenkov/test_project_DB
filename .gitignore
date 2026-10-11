@@ -7,3 +7,7 @@ certs/
 # Python
 .venv/
 __pycache__/
+.pytest_cache/
+
+# Local output captured by "make demo | tee"
+demo-output.txt

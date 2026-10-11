@@ -22,9 +22,21 @@ CREATE ROLE admin_role;
 -- USER() returns the account that is connected, e.g. 'alice_student@172.18.0.1'.
 -- SUBSTRING_INDEX(..., '@', 1) keeps the part before '@' -> 'alice_student'.
 -- So each student only sees the rows where students.db_username is their name.
--- (The view runs with the privileges of its creator, root, so the student does
---  NOT need access to the grades table itself.)
-CREATE VIEW my_grades AS
+--
+-- The view runs with the privileges of its DEFINER (SQL SECURITY DEFINER), so
+-- the student does NOT need access to the grades table itself. We do not want
+-- root as the definer: whoever can read the view would then read with root's
+-- rights, and any mistake in the view would be a mistake with full power
+-- (see experiments/09_views_and_deny.sql). Instead the definer is a dedicated
+-- account that:
+--   * cannot log in at all (ACCOUNT LOCK, no password, 'localhost' only), and
+--   * may only SELECT the three tables the view reads.
+CREATE USER 'my_grades_owner'@'localhost' ACCOUNT LOCK;
+GRANT SELECT ON university.grades   TO 'my_grades_owner'@'localhost';
+GRANT SELECT ON university.students TO 'my_grades_owner'@'localhost';
+GRANT SELECT ON university.courses  TO 'my_grades_owner'@'localhost';
+
+CREATE DEFINER = 'my_grades_owner'@'localhost' SQL SECURITY DEFINER VIEW my_grades AS
     SELECT c.code, c.title, g.grade
     FROM grades g
     JOIN students s ON s.student_id = g.student_id

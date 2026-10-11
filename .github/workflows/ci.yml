@@ -1,0 +1,110 @@
+# Continuous integration: starts the real MariaDB 13.1 server (the same Docker
+# image and docker-compose.yml as on a developer machine, including TLS and
+# ED25519), runs the whole pytest suite against it and then the full demo.
+#
+# Everything is covered on GitHub-hosted runners: Docker is preinstalled, and the
+# MariaDB Foundation's 13.1 image is public on quay.io. Nothing is mocked.
+#
+# Two jobs:
+#   test    pinned image digest = the exact build this project was verified with.
+#           A failure here is a real failure and blocks the build.
+#   canary  floating 13.1 tag. MariaDB 13.1 is a preview release; this job shows
+#           early if a newer build changes DENY/auth/TLS behaviour. It is allowed
+#           to fail without turning the whole workflow red.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"   # weekly, Monday 04:17 UTC, to run the canary
+
+permissions:
+  contents: read
+
+env:
+  PINNED_IMAGE: quay.io/mariadb-foundation/mariadb-devel@sha256:ed1087249cadb93623dd3b11258ea9790ad8f49c328dae5a5ef726ff1cea2931
+
+jobs:
+  test:
+    name: Tests on MariaDB 13.1 (pinned image)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Lint shell scripts
+        run: shellcheck scripts/*.sh sql/04_users.sh
+
+      - name: Start MariaDB 13.1 (random passwords, fresh certificates, TLS on)
+        run: make up
+        env:
+          MARIADB_IMAGE: ${{ env.PINNED_IMAGE }}
+
+      - name: Show the server version
+        run: docker compose exec -T mariadb mariadbd --version
+        env:
+          MARIADB_IMAGE: ${{ env.PINNED_IMAGE }}
+
+      - name: Install Python dependencies
+        run: make venv
+
+      - name: Run the test suite
+        run: make test
+        env:
+          MARIADB_IMAGE: ${{ env.PINNED_IMAGE }}
+
+      - name: Run the full demonstration
+        run: make demo 2>&1 | tee demo-output.txt
+        env:
+          MARIADB_IMAGE: ${{ env.PINNED_IMAGE }}
+
+      - name: Keep the demo output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-output
+          path: demo-output.txt
+          if-no-files-found: ignore
+
+      - name: Server log (on failure)
+        if: failure()
+        run: docker compose logs --no-color mariadb
+        env:
+          MARIADB_IMAGE: ${{ env.PINNED_IMAGE }}
+
+  canary:
+    name: Canary on the floating 13.1 tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Start MariaDB 13.1 (latest build of the tag)
+        run: make up
+
+      - name: Install Python dependencies
+        run: make venv
+
+      - name: Run the test suite
+        run: make test
+
+      - name: Server log (on failure)
+        if: failure()
+        run: docker compose logs --no-color mariadb

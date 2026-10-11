@@ -1,64 +1,97 @@
 """
-test_tls.py - attacks on TLS.
-
-Run:  python tests/test_tls.py
+test_tls.py - attacks on TLS: the connection must be encrypted AND the server verified.
 """
 
-import os
 import ssl
-import sys
 
 import pymysql
+import pytest
 
-from checks import expect_allowed, expect_blocked, summary
-from database import CERTS_DIR, connect, run_query
+from conftest import error_code
+from database import CERTS_DIR, PORT, connect, password_from_env, run_query
 
 CONNECT_ERROR = 2003            # client could not set up the connection
 INSECURE_TRANSPORT = 3159       # server: "Connections using insecure transport are prohibited"
 
 USER = "smith_professor"
-PASSWORD = os.environ["PROFESSOR_PASSWORD"]
 
 
-def run():
-    print("\n--- TLS ---")
-
-    def verified_tls_connection():
-        connection = connect(USER, PASSWORD)
-        status = dict(run_query(connection, "SHOW SESSION STATUS LIKE 'Ssl_version'"))
-        assert status["Ssl_version"].startswith("TLS"), status
-    expect_allowed("Correct CA + verification: encrypted connection succeeds",
-                   verified_tls_connection)
-
-    # Attack 1: the client is given a CA that did NOT sign the server's
-    # certificate (the situation a client is in when it talks to an impostor).
-    expect_blocked("Client trusts a different CA: connection refused",
-                   lambda: connect(USER, PASSWORD, ca_file=CERTS_DIR / "untrusted-ca.pem"),
-                   CONNECT_ERROR, "CERTIFICATE_VERIFY_FAILED")
-
-    # Attack 2: the certificate is only valid for "localhost".
-    expect_blocked("Host name not in the certificate (127.0.0.1): connection refused",
-                   lambda: connect(USER, PASSWORD, host="127.0.0.1"),
-                   CONNECT_ERROR, "CERTIFICATE_VERIFY_FAILED")
-
-    # Attack 3: try to talk to the server without any encryption.
-    expect_blocked("Plaintext (no TLS) connection: refused by the server",
-                   lambda: pymysql.connect(host="localhost", user=USER, password=PASSWORD,
-                                           ssl_disabled=True),
-                   INSECURE_TRANSPORT)
-
-    # Lesson, not an attack: encryption WITHOUT verification still connects,
-    # even though the client trusts nothing. It would connect to an impostor
-    # just as happily. This is "TLS assumed" instead of "TLS verified".
-    def unverified_tls_connects():
-        no_checks = ssl.create_default_context()
-        no_checks.check_hostname = False
-        no_checks.verify_mode = ssl.CERT_NONE
-        pymysql.connect(host="localhost", user=USER, password=PASSWORD, ssl=no_checks)
-    expect_allowed("Encryption with verification OFF connects anyway (why verification matters)",
-                   unverified_tls_connects)
+@pytest.fixture(scope="module")
+def password():
+    return password_from_env("PROFESSOR_PASSWORD")
 
 
-if __name__ == "__main__":
-    run()
-    sys.exit(summary())
+def message_of(callable_):
+    try:
+        callable_()
+    except pymysql.MySQLError as error:
+        return str(error.args[1])
+    pytest.fail("connection succeeded but should have been refused")
+
+
+def test_verified_connection_uses_modern_tls(password):
+    connection = connect(USER, password)
+    try:
+        status = dict(run_query(connection, "SHOW SESSION STATUS WHERE Variable_name IN ('Ssl_version', 'Ssl_cipher')"))
+    finally:
+        connection.close()
+    assert status["Ssl_version"] in ("TLSv1.2", "TLSv1.3")
+    assert status["Ssl_cipher"]
+
+
+def test_server_only_offers_tls_1_2_and_1_3(root):
+    assert run_query(root, "SHOW VARIABLES LIKE 'tls_version'")[0][1] == "TLSv1.2,TLSv1.3"
+
+
+def test_server_requires_secure_transport(root):
+    assert run_query(root, "SHOW VARIABLES LIKE 'require_secure_transport'")[0][1] == "ON"
+
+
+def test_client_trusting_a_different_ca_refuses_the_server(password):
+    wrong_ca = CERTS_DIR / "untrusted-ca.pem"
+    assert error_code(lambda: connect(USER, password, ca_file=wrong_ca)) == CONNECT_ERROR
+    assert "CERTIFICATE_VERIFY_FAILED" in message_of(lambda: connect(USER, password, ca_file=wrong_ca))
+
+
+def test_host_name_mismatch_is_refused(password):
+    """The certificate is valid for 'localhost' only; connecting to the IP must fail verification."""
+    text = message_of(lambda: connect(USER, password, host="127.0.0.1"))
+    assert "CERTIFICATE_VERIFY_FAILED" in text and "mismatch" in text.lower()
+
+
+def test_correct_host_name_is_accepted(password):
+    connect(USER, password, host="localhost").close()
+
+
+def test_plaintext_connection_is_refused_by_the_server(password):
+    assert error_code(lambda: pymysql.connect(host="localhost", port=PORT, user=USER, password=password,
+                                              ssl_disabled=True)) == INSECURE_TRANSPORT
+
+
+def test_plaintext_connection_is_refused_for_root_too():
+    assert error_code(lambda: pymysql.connect(
+        host="localhost", port=PORT, user="root", password=password_from_env("MARIADB_ROOT_PASSWORD"),
+        ssl_disabled=True)) == INSECURE_TRANSPORT
+
+
+def test_encryption_without_verification_connects_to_anyone(password):
+    """The lesson, not a defence: with verification OFF the client would accept an impostor too."""
+    no_checks = ssl.create_default_context()
+    no_checks.check_hostname = False
+    no_checks.verify_mode = ssl.CERT_NONE
+    pymysql.connect(host="localhost", port=PORT, user=USER, password=password, ssl=no_checks).close()
+
+
+def test_pymysql_default_encrypts_but_does_not_verify(password):
+    """The reason this project sets ssl_verify_cert / ssl_verify_identity explicitly.
+
+    With NO TLS options, PyMySQL 1.2 uses "preferred" mode: it encrypts, but trusts any
+    certificate and any host name. The connection below is encrypted yet would equally
+    reach an impostor server."""
+    connection = pymysql.connect(host="localhost", port=PORT, user=USER, password=password)
+    try:
+        version = dict(run_query(connection, "SHOW SESSION STATUS LIKE 'Ssl_version'"))["Ssl_version"]
+        assert version.startswith("TLS")
+        assert connection.ctx.verify_mode == ssl.CERT_NONE and connection.ctx.check_hostname is False
+    finally:
+        connection.close()
