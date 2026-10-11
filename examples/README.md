@@ -1,5 +1,36 @@
 # SQL tutorial
 
+## Start here (10 minutes)
+
+1. **Run everything once** (starts MariaDB 13.1, runs every demo; needs Docker, Python 3.10+, `make`):
+   ```bash
+   make demo
+   ```
+2. **Give the professor a password** - you choose it; it is set on the server and stored nowhere else
+   (at least 12 characters with upper and lower case, a digit and a symbol, or the server refuses it):
+   ```bash
+   make set-password USER=smith_professor
+   ```
+3. **Open a client as the professor** (asks for that password):
+   ```bash
+   make sql USER=smith_professor
+   ```
+4. **See the DENY at work** - type the two statements from section 7 of the main README:
+   ```sql
+   SELECT code, title FROM courses;   -- works: GRANT SELECT ON university.* TO professor_role
+   SELECT * FROM financial_records;
+   -- ERROR 1142 (42000): SELECT command denied to user 'smith_professor'@'localhost' for table `university`.`financial_records`
+   ```
+   The professor may read the whole database *except* that one table, because of a single
+   `DENY SELECT ON university.financial_records TO professor_role`. Type `exit` to leave.
+5. **Read how it works, step by step:** [02_deny.sql](02_deny.sql), or run it:
+   `.venv/bin/python app/sqlrunner.py examples/02_deny.sql`.
+
+Note: every `make demo` / `make test` gives the demo accounts new random passwords again; repeat step 2 to
+log in by hand afterwards.
+
+## The lessons
+
 Five short, runnable lessons. Each `.sql` file is ordinary SQL plus a few comment
 lines the runner understands (`-- @as`, `-- @expect`, `-- @why`, ...; the full list is at the top of
 [app/sqlrunner.py](../app/sqlrunner.py)). Every statement really runs on the MariaDB 13.1 server,
