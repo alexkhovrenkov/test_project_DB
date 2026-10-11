@@ -1,0 +1,9 @@
+# Real passwords - never commit
+.env
+
+# Generated TLS certificates and private keys - every user generates their own
+certs/
+
+# Python
+.venv/
+__pycache__/

@@ -1,0 +1,49 @@
+# Starts one MariaDB 13.1 server in a Docker container.
+#
+#   docker compose up -d --wait     start it (and wait until it is healthy)
+#   docker compose down -v          stop it AND delete the data (full reset)
+#
+# Values like ${MARIADB_ROOT_PASSWORD} are read from the .env file.
+
+services:
+  mariadb:
+    # MariaDB 13.1 is needed because it is the first version with DENY.
+    image: quay.io/mariadb-foundation/mariadb-devel:13.1
+    container_name: university-db
+
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      # Read by sql/04_users.sh when the demo users are created.
+      STUDENT_PASSWORD: ${STUDENT_PASSWORD}
+      PROFESSOR_PASSWORD: ${PROFESSOR_PASSWORD}
+      FINANCE_PASSWORD: ${FINANCE_PASSWORD}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+
+    # Make the container's port 3306 reachable as localhost:3306 on our computer.
+    ports:
+      - "3306:3306"
+
+    # The image runs every file in /docker-entrypoint-initdb.d (in alphabetical
+    # order) the FIRST time the database is created. That is how our schema,
+    # data, roles and users get loaded automatically.
+    volumes:
+      - ./sql:/docker-entrypoint-initdb.d:ro
+      # Certificates created by scripts/generate_certs.sh
+      - ./certs:/etc/mysql/certs:ro
+
+    # Extra server options = TLS configuration.
+    command:
+      - --ssl-cert=/etc/mysql/certs/server-cert.pem   # the server's certificate
+      - --ssl-key=/etc/mysql/certs/server-key.pem     # its private key
+      - --ssl-ca=/etc/mysql/certs/ca.pem              # the CA that signed it
+      # Refuse every network connection that does not use TLS.
+      # (Connections through the local Unix socket inside the container are
+      #  still allowed; that is how "docker exec ... mariadb" works.)
+      - --require-secure-transport=ON
+
+    # Lets "docker compose up --wait" know when the server is ready.
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
