@@ -1,5 +1,6 @@
 """
-conftest.py - shared fixtures. Every test talks to the real MariaDB server.
+conftest.py - shared fixtures for the INTEGRATION tests: every test here talks
+to the real MariaDB server. (Server-free tests live in tests/unit/.)
 
 Tests that need extra objects create them under a random name (t_<hex>) and
 remove them afterwards, so the suite is repeatable and leaves the university
@@ -19,15 +20,6 @@ ACCESS_DENIED_TABLE = 1142    # "<command> command denied ... for table ..."
 ACCESS_DENIED_COLUMN = 1143   # "<command> command denied ... for column ..."
 
 
-def pytest_sessionstart(session):
-    """Fail fast, with one clear message, if the server or configuration is missing."""
-    try:
-        socket_sql("SELECT 1")
-    except (ConfigError, SocketSQLError) as error:
-        pytest.exit(f"Cannot reach MariaDB through 'docker exec' ({error}). "
-                    "Start it with 'make up' (or run 'make test').", returncode=3)
-
-
 def error_code(callable_):
     """Run callable_; return the MariaDB error code it fails with. Fails the test if it succeeds."""
     try:
@@ -42,7 +34,14 @@ def harness():
     """The run's short-lived administrator (REQUIRE X509, random in-memory password).
 
     It also gives the four demo accounts fresh random passwords, kept in memory only.
+    Before anything else it checks that the server is reachable, and stops the whole
+    run with one clear message if it is not (instead of 150 identical errors).
     """
+    try:
+        socket_sql("SELECT 1")
+    except (ConfigError, SocketSQLError) as error:
+        pytest.exit(f"Cannot reach MariaDB through 'docker exec' ({error}). "
+                    "Start it with 'make up' (or run 'make test'). Server-free tests: 'make unit'.", returncode=3)
     with Harness() as admin:
         admin.activate_demo_accounts()
         yield admin

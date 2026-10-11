@@ -17,11 +17,12 @@ CONTAINER := $(or $(MARIADB_CONTAINER),university-db)
 USER_NAME := $(if $(filter command line,$(origin USER)),$(USER),)
 
 .DEFAULT_GOAL := help
-.PHONY: help certs up venv setup demo roles examples experiments test set-password shell sql lockout down reset clean lint
+.PHONY: help certs up venv setup demo roles examples experiments test unit set-password shell sql lockout down reset clean lint
 
 help:
 	@echo "make demo                   start MariaDB 13.1 (first run: also certificates and venv) and run every demonstration"
 	@echo "make test                   same setup, then run the pytest suite against the real server"
+	@echo "make unit                   server-free unit tests only (no Docker needed)"
 	@echo "make roles                  role demo only: the same six actions as each of the four roles"
 	@echo "make examples               the standalone SQL tutorial (examples/*.sql)"
 	@echo "make experiments            the advanced security experiments (experiments/*.sql)"
@@ -66,6 +67,9 @@ demo: roles examples experiments
 
 test: setup
 	$(PYTHON) -m pytest
+
+unit: venv
+	$(PYTHON) -m pytest tests/unit
 
 set-password: setup
 	@if [ -z "$(USER_NAME)" ]; then echo "usage: make set-password USER=smith_professor"; exit 2; fi

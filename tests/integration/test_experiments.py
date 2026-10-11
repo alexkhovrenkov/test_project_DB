@@ -13,12 +13,12 @@ import pytest
 
 from sqlrunner import run_script
 
-PROJECT = Path(__file__).resolve().parent.parent
+PROJECT = Path(__file__).resolve().parents[2]
 SCRIPTS = sorted((PROJECT / "examples").glob("*.sql")) + sorted((PROJECT / "experiments").glob("*.sql"))
 
 
 def test_scripts_were_found():
-    assert len(SCRIPTS) >= 16
+    assert len(SCRIPTS) >= 18
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda path: f"{path.parent.name}/{path.name}")

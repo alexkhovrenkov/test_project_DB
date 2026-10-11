@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-PROJECT = Path(__file__).resolve().parent.parent
+PROJECT = Path(__file__).resolve().parents[2]
 
 
 def tracked_files():
@@ -21,7 +21,8 @@ def tracked_files():
 
 def test_private_keys_are_owner_readable_only():
     keys = sorted((PROJECT / "certs").glob("*-key.pem"))
-    assert keys, "run 'make certs' first"
+    if not keys:
+        pytest.skip("no certificates yet (make certs)")
     for key in keys:
         mode = stat.S_IMODE(key.stat().st_mode)
         assert mode & 0o077 == 0, f"{key.name} is accessible by group/others (mode {oct(mode)})"
