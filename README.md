@@ -296,7 +296,7 @@ data directory - and every account still has a real authentication method:
 
 | Account | Authentication | Where its secret lives |
 |---|---|---|
-| `root@localhost` (no `root@'%'` exists) | **`unix_socket`**: the OS user `root` inside the container | nowhere - there is no password. Use `make shell` / `docker exec … mariadb`. |
+| `root@localhost` (no `root@'%'` exists) | **`unix_socket`** (the OS user `root` inside the container) `OR` an ed25519 key nobody can use - see finding 12 for why the second method exists | nowhere - there is no password. Use `make shell` / `docker exec … mariadb`. |
 | `alice_student`, `smith_professor`, `jones_finance`, `uni_admin` | **ED25519** | created `ACCOUNT LOCK` with an unusable key; a person sets a password with `make set-password` (getpass) and types it at login, or an automated run sets a random one that exists only in that process's memory |
 | `harness_<hex>` - the administrator of one test/demo run | **ED25519 + `REQUIRE X509`** | random password in process memory only, plus `certs/client-key.pem` (issued by the project CA); dropped at the end of the run |
 | `my_grades_owner@localhost` (view definer) | none - `ACCOUNT LOCK`, cannot log in | - |
@@ -316,8 +316,9 @@ data directory - and every account still has a real authentication method:
    the container log.
 2. `04_users.sql` creates the demo accounts with `IDENTIFIED VIA ed25519 USING '<public key>' ACCOUNT LOCK`.
    The public key belongs to 32 random bytes that were discarded after computing it, so no password matches.
-3. The last init script switches root to `IDENTIFIED VIA unix_socket` and removes the image's `healthcheck`
-   accounts together with the file holding their password (`/var/lib/mysql/.my-healthcheck.cnf`);
+3. The last init script switches root to `IDENTIFIED VIA unix_socket OR ed25519 USING '<unusable key>'` and
+   removes the image's `healthcheck` accounts together with the file holding their password
+   (`/var/lib/mysql/.my-healthcheck.cnf`);
    `healthcheck.sh` then connects as the OS user root through the socket. We checked the container still
    becomes healthy, also after a restart that keeps the data.
 4. Each automated run creates `harness_<hex>` through `docker exec` (socket root) with a random password and
@@ -399,7 +400,8 @@ Attacks and results ([tests/test_authentication.py](tests/test_authentication.py
 | Locked account (`ACCOUNT LOCK`) with the correct password | error **4151** | ✅ |
 | Expired password | login ok, every statement fails with **1820** | ✅ |
 | root over the network (TLS), with an empty, guessed or any password | error **1045** - `root@'%'` does not exist | ✅ |
-| root through `docker exec` | `root@localhost`, plugin `unix_socket`, no password | ✅ |
+| root through `docker exec` | `root@localhost` via the `unix_socket` method, no password | ✅ |
+| 200 logins with unknown user names | all **1045**, like a real account (no enumeration, finding 12) | ✅ |
 | Harness account with the right password but **without** its client certificate | error **1045** | ✅ |
 | Any live password (harness + 4 demo accounts) in any file of the project directory, `.env` included | none | ✅ |
 | Password variables in the container environment / healthcheck password file in the data directory | only `MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=1` / file absent | ✅ |
@@ -562,6 +564,27 @@ Step 10  user: root@localhost (new session)
 -> 14_public_lockout.sh: 13 passed, 0 failed
 ```
 
+12. **A `unix_socket`-only account opens a user-enumeration oracle.** For a login with an *unknown* user name,
+    MariaDB imitates the authentication plugin of a random existing account. When it picks a `unix_socket`
+    account the attempt fails with **1698** ("Access denied for user ...", without "using password"),
+    while every real network account fails with **1045**. So one 1698 proves the name does not exist. We hit
+    this ourselves: our first design made root `unix_socket`-only, and the CI run for that commit failed
+    `test_unknown_user_and_wrong_password_look_identical` once. Measured (real runs, wrong password):
+
+    | Server state | 200 unknown names | real account (100×) |
+    |---|---|---|
+    | root `unix_socket` only (1 of 13 accounts) | 185 × 1045, **15 × 1698** | 100 × 1045 |
+    | + 10 extra `unix_socket` accounts | 72 × 1045, **128 × 1698** | 100 × 1045 |
+    | root `ed25519 … OR unix_socket` (disposable server, 300 names) | 213 × 1045, **87 × 1698** | 100 × 1045 |
+    | root `unix_socket OR ed25519 USING '<unusable key>'` (disposable server, 300 names) | **300 × 1045** | 100 × 1045 |
+
+    The account's *main* plugin (the `plugin` column, which is the **last** method of an `OR` chain) is what
+    gets imitated. The project now uses the last row ([sql/06_lockdown.sh](sql/06_lockdown.sh)):
+    `test_unknown_users_are_indistinguishable_from_real_ones` checks 200 unknown names, and
+    `test_a_unix_socket_only_account_opens_a_user_enumeration_oracle` re-creates the oracle with temporary
+    accounts. *Implication:* never leave a `unix_socket`-only account on a server that is reachable over the
+    network; put `unix_socket` first in an `OR` chain that ends with a method network accounts use.
+
 Routine-level DENY (experiment 13) behaved exactly as documented. Real excerpt:
 ```
 Step 7  user: exp_u  (active role: none)
@@ -585,6 +608,7 @@ privilege silently returns `NULL` instead of an error.
 | Stranger guesses a password | ED25519 login | [test_authentication.py](tests/test_authentication.py) | 1045 |
 | Attacker steals `mysql.user` and replays the stored value | ED25519 stores a public key only | `test_stolen_authentication_string...` | 1045 |
 | Account enumeration through error messages | identical error for unknown user / wrong password | `test_unknown_user_and_wrong_password_look_identical` | 1045 |
+| Account enumeration through the imitated plugin (finding 12) | root's auth chain ends in ed25519 | `test_unknown_users_are_indistinguishable_from_real_ones` | 1045 (never 1698) |
 | Eavesdropping on the connection | TLS | `test_verified_connection_uses_modern_tls` | - |
 | Impostor server with its own certificate | CA verification | `test_client_trusting_a_different_ca...` | client: `CERTIFICATE_VERIFY_FAILED` |
 | Traffic redirected to the wrong host name | host-name verification | `test_host_name_mismatch_is_refused` | client: `IP address mismatch` |
@@ -692,6 +716,8 @@ locally including on x86_64), but it has not yet been executed on GitHub - that 
 * The harness's client key (`certs/client-key.pem`) is a long-lived file credential. It is not sufficient on its
   own (the account also needs its in-memory password and exists only during a run), but it is a secret on
   disk, protected only by file permissions (`600`).
+* During first initialisation `strict_password_validation` is switched off for the one statement that sets root's
+  unusable key, while the init server has no network; it is switched on again in the same session.
 * During the few seconds of first initialisation root has an empty password, reachable only through the socket
   of the temporary server (no networking). If initialisation failed before `06_lockdown.sh`, the container
   would be left in that state; `make reset` starts over.

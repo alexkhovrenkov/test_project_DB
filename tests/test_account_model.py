@@ -9,9 +9,11 @@ harness itself needs a client certificate on top of its in-memory password.
 
 import json
 import re
+import secrets
 import subprocess
 import sys
 
+import pymysql
 import pytest
 
 from admin import DOCKER, HARNESS_NAME, socket_sql
@@ -20,6 +22,7 @@ from database import (ACCOUNTS, CONTAINER, PROJECT_DIR, connect, password_for, r
                       strong_password)
 
 ACCESS_DENIED = 1045
+ACCESS_DENIED_NO_PASSWORD = 1698   # what a failed unix_socket login returns
 SKIPPED_DIRS = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
 
 
@@ -29,17 +32,24 @@ def project_files():
             yield path
 
 
+UNUSABLE_KEY = "Sv1MQTlVnCTyb4USqBdcQ87pFwhv7cbvwC5IIXBymhY"   # sql/04_users.sql, sql/06_lockdown.sh
+
+
 def test_root_logs_in_through_the_container_socket_without_a_password():
-    """docker exec ... mariadb as the OS user root: unix_socket authentication."""
-    user, plugin = socket_sql("SELECT CURRENT_USER(), "
-                              "(SELECT plugin FROM mysql.user WHERE user = 'root' AND host = 'localhost')")[0].split("\t")
-    assert user == "root@localhost"
-    assert plugin == "unix_socket"
+    """docker exec ... mariadb as the OS user root: the unix_socket method of root's chain."""
+    assert socket_sql("SELECT CURRENT_USER()") == ["root@localhost"]
+
+
+def test_root_is_unix_socket_or_an_unusable_ed25519_key(dba):
+    """root = unix_socket OR ed25519 USING '<key of a discarded secret>': no usable password exists."""
+    (priv,) = run_query(dba, "SELECT Priv FROM mysql.global_priv WHERE User = 'root' AND Host = 'localhost'")[0]
+    priv = json.loads(priv)
+    assert priv["plugin"] == "ed25519" and priv["authentication_string"] == UNUSABLE_KEY
+    assert [method.get("plugin") for method in priv["auth_or"]] == ["unix_socket", None]
 
 
 def test_root_has_no_network_account(dba):
-    rows = run_query(dba, "SELECT host, plugin FROM mysql.user WHERE user = 'root'")
-    assert rows == (("localhost", "unix_socket"),)
+    assert run_query(dba, "SELECT host FROM mysql.user WHERE user = 'root'") == (("localhost",),)
 
 
 @pytest.mark.parametrize("password", ["", "root", "anything-at-all"])
@@ -122,3 +132,36 @@ def test_demo_password_change_takes_effect(harness):
     remember_password("jones_finance", new)
     connect("jones_finance", new).close()
     assert error_code(lambda: connect("jones_finance", old)) == ACCESS_DENIED
+
+
+def login_error_codes(user_names):
+    codes = []
+    for name in user_names:
+        try:
+            connect(name, "wrong-Password-1", database=None)
+        except pymysql.MySQLError as error:
+            codes.append(error.args[0])
+    return codes
+
+
+def test_unknown_users_are_indistinguishable_from_real_ones():
+    """Finding 12, closed: 200 unknown names all fail exactly like a real account (1045)."""
+    codes = login_error_codes(f"no_such_user_{secrets.token_hex(4)}" for _ in range(200))
+    assert set(codes) == {1045}
+    assert set(login_error_codes(["smith_professor"] * 20)) == {1045}
+
+
+def test_a_unix_socket_only_account_opens_a_user_enumeration_oracle(dba):
+    """Finding 12, the cause: for an unknown user MariaDB imitates the plugin of a random
+    existing account. Add unix_socket-only accounts and unknown names start failing with 1698
+    (real network accounts never do), which tells an attacker the name does not exist."""
+    names = [f"t_sock_{secrets.token_hex(4)}" for _ in range(10)]
+    try:
+        for name in names:
+            run_query(dba, f"CREATE USER {name}@localhost IDENTIFIED VIA unix_socket")
+        codes = login_error_codes(f"no_such_user_{secrets.token_hex(4)}" for _ in range(60))
+        assert ACCESS_DENIED_NO_PASSWORD in codes and ACCESS_DENIED in codes
+        assert set(login_error_codes(["smith_professor"] * 20)) == {ACCESS_DENIED}
+    finally:
+        for name in names:
+            run_query(dba, f"DROP USER IF EXISTS {name}@localhost")
