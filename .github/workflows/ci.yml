@@ -43,7 +43,7 @@ jobs:
           cache-dependency-path: requirements*.txt
 
       - name: Lint shell scripts
-        run: shellcheck scripts/*.sh sql/*.sh
+        run: shellcheck scripts/*.sh sql/*.sh experiments/*.sh
 
       - name: Start MariaDB 13.1 (random passwords, fresh certificates, TLS on)
         run: make up
@@ -65,6 +65,11 @@ jobs:
 
       - name: Run the full demonstration
         run: make demo 2>&1 | tee demo-output.txt
+        env:
+          MARIADB_IMAGE: ${{ env.PINNED_IMAGE }}
+
+      - name: Experiment 14 - PUBLIC hard lockout on a disposable server
+        run: make lockout
         env:
           MARIADB_IMAGE: ${{ env.PINNED_IMAGE }}
 

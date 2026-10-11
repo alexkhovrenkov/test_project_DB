@@ -17,7 +17,7 @@ CONTAINER := $(or $(MARIADB_CONTAINER),university-db)
 USER_NAME := $(if $(filter command line,$(origin USER)),$(USER),)
 
 .DEFAULT_GOAL := help
-.PHONY: help certs up venv setup demo roles examples experiments test set-password shell sql down reset clean lint
+.PHONY: help certs up venv setup demo roles examples experiments test set-password shell sql lockout down reset clean lint
 
 help:
 	@echo "make demo                   start MariaDB 13.1 (first run: also certificates and venv) and run every demonstration"
@@ -28,6 +28,7 @@ help:
 	@echo "make set-password USER=...  choose a password for a demo account (asked for, never stored)"
 	@echo "make sql USER=...           open the mariadb client as that demo account (asks for its password)"
 	@echo "make shell                  open the mariadb client as root (unix_socket, no password)"
+	@echo "make lockout                experiment 14: PUBLIC hard lockout + recovery on a DISPOSABLE server"
 	@echo "make down                   stop the server (keeps the data)"
 	@echo "make reset                  stop the server and DELETE its data; next 'make up' starts from scratch"
 	@echo "make clean                  reset + delete certificates and the virtual environment"
@@ -77,6 +78,9 @@ sql:
 	@if [ -z "$(USER_NAME)" ]; then echo "usage: make sql USER=smith_professor"; exit 2; fi
 	docker exec -it $(CONTAINER) mariadb -u $(USER_NAME) -p university
 
+lockout:
+	bash experiments/14_public_lockout.sh
+
 down:
 	$(COMPOSE) down
 
@@ -87,4 +91,4 @@ clean: reset
 	rm -rf .venv certs .pytest_cache
 
 lint:
-	shellcheck scripts/*.sh sql/*.sh
+	shellcheck scripts/*.sh sql/*.sh experiments/*.sh

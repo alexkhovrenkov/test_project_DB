@@ -473,6 +473,7 @@ Step 3  user: exp_viewer  (active role: none)
 | 11 | [database_name_patterns](experiments/11_database_name_patterns.sql) | `_`/`%` wildcards in GRANT and DENY | Unescaped `_` leaks a grant; pattern DENY ignored (finding 6) |
 | 12 | [password_policy](experiments/12_password_policy.sql) | Do the validation and reuse plugins guard ED25519 accounts? What gets through? | Weak and reused passwords refused (1819/1396/1290); refused passwords recorded, history outlives `DROP USER`, shared passwords allowed (findings 9-11) |
 | 13 | [routine_deny](experiments/13_routine_deny.sql) | `DENY EXECUTE ON PROCEDURE/FUNCTION` inside a schema-wide `GRANT EXECUTE` | Calls refused (1370), routine hidden from `INFORMATION_SCHEMA.ROUTINES`, type required (1144), `DROP` removes the deny and re-creating does not restore it |
+| 14 | [public_lockout](experiments/14_public_lockout.sh) (shell, `make lockout`) | PUBLIC hard lockout on a disposable server, and every recovery path | Documented recovery works for `DENY UPDATE`; with `DENY UPDATE, DELETE` only `--skip-grant-tables` helps (finding 8) |
 
 And five standalone tutorial lessons in [examples/](examples/) (roles, DENY, inheritance, column privileges,
 ED25519 failures) - see [examples/README.md](examples/README.md) for how to follow them with any SQL client.
@@ -499,7 +500,9 @@ experiment *and* asserted by a test.
    qualifies the documentation's statement that a deny on any held role beats a grant on any other role
    at any depth: that holds only once the role graph has been rebuilt. *Implication:* after denying a role that other roles
    inherit, run `FLUSH PRIVILEGES` and **test**. (experiment 2, `test_deny_in_a_nested_role_...`)
-   We have not reported this upstream; it is worth a [MariaDB Jira](https://jira.mariadb.org) ticket.
+   A bug report with a minimal reproduction is prepared in
+   [docs/upstream-report-nested-role-deny.md](docs/upstream-report-nested-role-deny.md); it has not been filed
+   in the MariaDB Jira yet.
 2. **A DENY attached to a role vanishes when the user runs `SET ROLE NONE`** if some other privilege
    (a direct grant, another role) still allows the access. A DENY on the *account* or on `PUBLIC` cannot be
    shed. *Implication:* anchor DENYs to the account when privileges can arrive by several paths.
@@ -520,11 +523,18 @@ experiment *and* asserted by a test.
    more specific (exact) entry exists, so the broad DENY silently does nothing. (experiment 11)
 7. **DENYs outlive what they point to.** `DROP DATABASE` leaves a database-level DENY; a re-created database
    with the same name is silently denied again. (experiment 4)
-8. **`DENY ... TO PUBLIC` applies to root too.** Existing sessions keep working; new ones are denied. Root
-   can recover with `REVOKE DENY ... FROM PUBLIC` (experiment 7). The documentation warns that denying
-   `UPDATE` on `mysql.global_priv` to PUBLIC removes even that recovery path (restart with
-   `--skip-grant-tables` required). **That hard lockout is not reproduced here** - it needs a disposable
-   server restart - so it rests on the documentation only.
+8. **`DENY ... TO PUBLIC` applies to every administrator, and can lock them all out.** Existing sessions keep
+   working; new ones are denied. For a database-level PUBLIC deny the administrator recovers with
+   `REVOKE DENY ... FROM PUBLIC` (experiment 7). The hard lockout is reproduced on a **disposable server**
+   by `make lockout` ([experiments/14_public_lockout.sh](experiments/14_public_lockout.sh); a separately named
+   container and volume, removed afterwards - never the project's server):
+   * `DENY UPDATE ON *.* TO PUBLIC`: in new sessions root gets 1142 on any UPDATE, `REVOKE DENY ... FROM
+     PUBLIC` fails with **1045 "Access denied ... (using password: NO)"** - a misleading code that reads like
+     a failed login - and `UPDATE mysql.global_priv` fails with 1142. The documented recovery works:
+     `DELETE FROM mysql.global_priv WHERE User = 'PUBLIC'; FLUSH PRIVILEGES;` (DELETE was never denied).
+   * `DENY UPDATE, DELETE ON *.* TO PUBLIC`: now the documented recovery fails too (1142 on the DELETE).
+     Nothing over SQL lifts it; only a restart with `--skip-grant-tables` (access to the server process,
+     not just SQL), deleting the row, and a normal restart. All 13 steps passed.
 
 9. **The password reuse history keeps refused passwords and outlives the account.** A password that fails
    `simple_password_check` is still written to `mysql.password_reuse_check_history`: the second attempt with
@@ -539,6 +549,18 @@ experiment *and* asserted by a test.
     password containing the account name, and credentials that existed before the plugins were installed
     (the policy never re-checks them: `my_grades_owner` and the image's `mariadb.sys` keep an empty password -
     both are locked, which is why locking matters). (experiment 12)
+
+Real excerpt of `make lockout` (finding 8):
+```
+Step 10  user: root@localhost (new session)
+    SQL      DELETE FROM mysql.global_priv WHERE User = 'PUBLIC';
+    Expected ERROR 1142
+    Actual   ERROR 1142 (42000): DELETE command denied to user 'root'@'localhost' for table `mysql`.`global_priv`
+    Result   PASS
+    Why      The documented recovery is closed as well: root cannot delete PUBLIC's row.
+...
+-> 14_public_lockout.sh: 13 passed, 0 failed
+```
 
 Routine-level DENY (experiment 13) behaved exactly as documented. Real excerpt:
 ```
@@ -576,6 +598,7 @@ privilege silently returns `NULL` instead of an error.
 | User grants themselves access / grants to PUBLIC | GRANT OPTION rules | experiment 5 | 1142 |
 | Delegated admin unlocks their own DENY | DENY needs the privilege to lift | experiment 5 | 1142 |
 | Create accounts, read `mysql.*`, change root's password | global privileges absent | experiments 5, 6 | 1227 / 1142 / 1044 |
+| Administrator mistake: `DENY ... TO PUBLIC` on everything | nothing over SQL; recovery needs server access | `make lockout` | 1142 / 1045 |
 | User calls a stored procedure/function inside a schema they may execute | routine-level DENY | `test_routine_deny_beats_database_grant_execute` | 1370 |
 | Weak password set for an account | `simple_password_check` | `test_weak_passwords_are_refused` | 1819 |
 | Old password set again | `password_reuse_check` | `test_reuse_is_refused_by_set_password_with_1819` | 1819 / 1396 |
@@ -684,7 +707,6 @@ locally including on x86_64), but it has not yet been executed on GitHub - that 
   credentials that existed before the plugins were installed (finding 11).
 * `MariaDB 13.1` is a **preview** release; the findings in section 11 (especially finding 1) may change.
   The Docker tag floats; pin `MARIADB_IMAGE` to a digest for exact reproducibility.
-* The documented hard lockout (PUBLIC DENY on `mysql.global_priv`) is not reproduced.
 * `make` is required (use WSL on Windows). The `university-db` container name is fixed, so two copies of the
   project cannot run at the same time.
 
