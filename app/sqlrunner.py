@@ -34,12 +34,17 @@ Directives (all start with "-- @"):
 Placeholders: '{{pw}}' in a statement stands for a random password generated
 for each run, so example files never contain a credential. It is sent as a
 driver parameter (%s), not pasted into the SQL text.
+{{run}} is replaced by a random hex string (6 characters) that is the same for
+the whole run; it is used in account names that must be new on every run.
+It is generated here, never taken from input, so formatting it into an
+identifier is safe.
 """
 
 import argparse
 import re
 import sys
 from dataclasses import dataclass, field
+import secrets
 from pathlib import Path
 
 import pymysql
@@ -143,6 +148,7 @@ class Session:
     def __init__(self, harness, run_password):
         self.harness = harness
         self.run_password = run_password   # random, for accounts the script creates
+        self.run_id = secrets.token_hex(3)  # for {{run}}
         self.connections = {}
         self.roles = {}
 
@@ -161,7 +167,11 @@ class Session:
             return self.harness.connect()
         return connect(account, password, database=None)
 
+    def account_name(self, account):
+        return account.replace("{{run}}", self.run_id)
+
     def connection(self, account, fresh=False):
+        account = self.account_name(account)
         if fresh:
             self.drop(account)
         if account not in self.connections:
@@ -205,11 +215,12 @@ def execute(step, session):
     """Run one step. Returns (outcome, rows) where outcome is 'ok' or 'error <code>: <message>'."""
     try:
         if step.kind == "login":
-            password = session.password(step.account, wrong=bool(step.login_mode))
-            session.open(step.account, password).close()
+            account = session.account_name(step.account)
+            password = session.password(account, wrong=bool(step.login_mode))
+            session.open(account, password).close()
             return "ok", []
         connection = session.connection(step.account, fresh=step.reconnect_first)
-        sql, params = step.text, None
+        sql, params = step.text.replace("{{run}}", session.run_id), None
         if "'{{pw}}'" in sql:
             # The password becomes a driver parameter: %s, with any literal % doubled.
             sql, params = sql.replace("%", "%%").replace("'{{pw}}'", "%s"), (session.run_password,)

@@ -1,5 +1,5 @@
 #!/bin/bash
-# 05_lockdown.sh - the last init step: leave no password anywhere.
+# 06_lockdown.sh - the last init step: leave no password anywhere.
 #
 # The image's entrypoint (started with MARIADB_ALLOW_EMPTY_ROOT_PASSWORD and
 # MARIADB_ROOT_HOST=localhost, see docker-compose.yml) creates root@localhost

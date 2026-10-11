@@ -86,7 +86,7 @@ def test_container_environment_and_data_directory_hold_no_password():
                              capture_output=True, text=True, check=True)
     passwords = [entry for entry in json.loads(inspect.stdout) if "PASSWORD" in entry.split("=", 1)[0]]
     assert passwords == ["MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=1"]
-    # The image's healthcheck account and its password file were removed by sql/05_lockdown.sh.
+    # The image's healthcheck account and its password file were removed by sql/06_lockdown.sh.
     assert socket_sql("SELECT COUNT(*) FROM mysql.user WHERE user = 'healthcheck'") == ["0"]
     listing = subprocess.run([DOCKER, "exec", CONTAINER, "ls", "-a", "/var/lib/mysql"],
                              capture_output=True, text=True, check=True).stdout.split()

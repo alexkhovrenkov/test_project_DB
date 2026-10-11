@@ -60,7 +60,7 @@ method instead of a password in a config file, verified TLS, then attack the set
 | Brief | Where it is done and shown |
 |---|---|
 | Roles and `DENY` doing the work | [sql/03_roles.sql](sql/03_roles.sql); sections 6-7; experiments 1, 2, 8 |
-| Authentication method instead of a stored password | `unix_socket` for root, ED25519 (+ X509 for the harness), no password on disk: [sql/04_users.sql](sql/04_users.sql), [sql/05_lockdown.sh](sql/05_lockdown.sh), [app/admin.py](app/admin.py); section 8 |
+| Authentication method instead of a stored password | `unix_socket` for root, ED25519 (+ X509 for the harness), no password on disk: [sql/04_users.sql](sql/04_users.sql), [sql/06_lockdown.sh](sql/06_lockdown.sh), [app/admin.py](app/admin.py); section 8 |
 | An attack against each control | section 12; [experiments/](experiments/); [tests/](tests/) |
 | TLS verified rather than assumed, and shown to be | section 9; [tests/test_tls.py](tests/test_tls.py) |
 | Reproducible from the README on a fresh server | `make demo`; section 3; verified from a clean copy (section 13) |
@@ -306,7 +306,7 @@ data directory - and every account still has a real authentication method:
 | **ED25519** ✅ | every network account. Ships with MariaDB, works with `pip install pymysql[ed25519]`, works over TLS. |
 | **PARSEC** | not used: the pure-Python PyMySQL cannot speak it (it needs a locally compiled C connector). |
 
-**How it is built** ([sql/04_users.sql](sql/04_users.sql), [sql/05_lockdown.sh](sql/05_lockdown.sh),
+**How it is built** ([sql/04_users.sql](sql/04_users.sql), [sql/06_lockdown.sh](sql/06_lockdown.sh),
 [app/admin.py](app/admin.py)):
 
 1. The container starts with `MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=1` and `MARIADB_ROOT_HOST=localhost`: the
@@ -342,6 +342,42 @@ CURRENT_USER()
 smith_professor@%
 ERROR 1142 (42000) at line 1: SELECT command denied to user 'smith_professor'@'localhost' for table `university`.`financial_records`
 ```
+
+### Password policy: validation and reuse plugins
+
+[sql/05_password_policy.sql](sql/05_password_policy.sql) installs **`simple_password_check`** (configured in
+[docker-compose.yml](docker-compose.yml): at least 12 characters, upper and lower case, a digit, a special
+character) and **`password_reuse_check`** (`password_reuse_check_interval=365` days). `cracklib_password_check`
+is not shipped in the image (we listed `/usr/lib/mysql/plugin`). We checked on the live server that validation
+applies to `IDENTIFIED VIA ed25519 USING PASSWORD(...)` and to `SET PASSWORD` for ed25519 accounts, and that
+`strict_password_validation` (ON by default) matters: it refuses credentials given as a ready-made public key
+(error 1290), which the plugins could not check. The random passwords of the harness and the demo runs always
+contain all character classes (`strong_password()` in [app/database.py](app/database.py)).
+[experiments/12_password_policy.sql](experiments/12_password_policy.sql) and
+[tests/test_password_policy.py](tests/test_password_policy.py) show it; real excerpt:
+
+```
+Step 10  user: dba (harness_fcbbec84)  (active role: none)
+    SQL      ALTER USER exp_pw_{{run}}@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
+    Expected error 1396
+    Actual   error 1396: Operation ALTER USER failed for 'exp_pw_0e6664'@'%'
+    Result   PASS
+Step 11  user: dba (harness_fcbbec84)  (active role: none)
+    SQL      SHOW WARNINGS;
+    Actual   ok (3 rows)
+             | Warning  1819  password_reuse_check: The password was already used
+             | Error    1819  Your password does not satisfy the current policy requirements (password_reuse_check)
+             | Error    1396  Operation ALTER USER failed for 'exp_pw_0e6664'@'%'
+```
+
+| Attempt (as the administrator) | Result |
+|---|---|
+| `abc`, `password12345`, `PASSWORD-12345`, `Password-short` | refused, **1819** (`simple_password_check`) |
+| `IDENTIFIED VIA ed25519` without a password (= empty password) | refused, **1819** |
+| a pre-computed ed25519 public key (`USING '<key>'`) | refused, **1290** (`strict_password_validation`) |
+| the same password again with `SET PASSWORD` | refused, **1819** (`password_reuse_check`) |
+| the same password again with `ALTER USER` | refused, but as **1396**; the reason is only in `SHOW WARNINGS` (finding 10) |
+| the same password for a *different* account; a password containing the account name | **accepted** (finding 11) |
 
 **ED25519 login:** the client says who it is; the server sends a random challenge; the client recomputes the
 private key from the typed password and *signs* the challenge; the server verifies with the stored public key.
@@ -434,6 +470,7 @@ Step 3  user: exp_viewer  (active role: none)
 | 9 | [views_and_deny](experiments/09_views_and_deny.sql) | DENY vs `SQL SECURITY DEFINER` / `INVOKER` views | DENY on the viewer does not follow a definer view (finding 3) |
 | 10 | [metadata_visibility](experiments/10_metadata_visibility.sql) | What can a denied user still learn? | Listings hidden; error codes leak existence (finding 5) |
 | 11 | [database_name_patterns](experiments/11_database_name_patterns.sql) | `_`/`%` wildcards in GRANT and DENY | Unescaped `_` leaks a grant; pattern DENY ignored (finding 6) |
+| 12 | [password_policy](experiments/12_password_policy.sql) | Do the validation and reuse plugins guard ED25519 accounts? What gets through? | Weak and reused passwords refused (1819/1396/1290); refused passwords recorded, history outlives `DROP USER`, shared passwords allowed (findings 9-11) |
 
 And five standalone tutorial lessons in [examples/](examples/) (roles, DENY, inheritance, column privileges,
 ED25519 failures) - see [examples/README.md](examples/README.md) for how to follow them with any SQL client.
@@ -487,6 +524,20 @@ experiment *and* asserted by a test.
    `--skip-grant-tables` required). **That hard lockout is not reproduced here** - it needs a disposable
    server restart - so it rests on the documentation only.
 
+9. **The password reuse history keeps refused passwords and outlives the account.** A password that fails
+   `simple_password_check` is still written to `mysql.password_reuse_check_history`: the second attempt with
+   the same weak password is reported as *reused*. After `DROP USER`, re-creating the account with its old
+   password is refused as reused. The history is never cleaned for dropped accounts. The plugin documentation
+   does not mention either behaviour. (experiment 12, `test_a_refused_password_is_still_recorded_as_used`,
+   `test_reuse_history_survives_drop_user`)
+10. **The same policy violation has two error codes.** Reuse through `SET PASSWORD` is error 1819; through
+    `ALTER USER ... IDENTIFIED VIA ed25519 USING PASSWORD(...)` it is the generic **1396** "Operation ALTER USER
+    failed", with the 1819 only in `SHOW WARNINGS`. Code that looks for 1819 misses it. (experiment 12)
+11. **What the password policy does not catch:** two accounts sharing a password (reuse is per account), a
+    password containing the account name, and credentials that existed before the plugins were installed
+    (the policy never re-checks them: `my_grades_owner` and the image's `mariadb.sys` keep an empty password -
+    both are locked, which is why locking matters). (experiment 12)
+
 Other results worth knowing: a delegated administrator with `GRANT OPTION` cannot hand out, or unlock for
 themselves, a privilege they are DENIED (experiment 5); `SELECT *` with only some column grants fails at
 table level (1142), referencing a denied column fails at column level (1143); `LOAD_FILE` without the FILE
@@ -512,6 +563,9 @@ privilege silently returns `NULL` instead of an error.
 | User grants themselves access / grants to PUBLIC | GRANT OPTION rules | experiment 5 | 1142 |
 | Delegated admin unlocks their own DENY | DENY needs the privilege to lift | experiment 5 | 1142 |
 | Create accounts, read `mysql.*`, change root's password | global privileges absent | experiments 5, 6 | 1227 / 1142 / 1044 |
+| Weak password set for an account | `simple_password_check` | `test_weak_passwords_are_refused` | 1819 |
+| Old password set again | `password_reuse_check` | `test_reuse_is_refused_by_set_password_with_1819` | 1819 / 1396 |
+| Bypass the policy with a pre-computed key | `strict_password_validation` | `test_precomputed_public_key_is_refused...` | 1290 |
 | Locked / expired account | `ACCOUNT LOCK`, `PASSWORD EXPIRE` | `test_locked_account...`, `test_expired_password...` | 4151 / 1820 |
 | SQL injection through the app | parameters + input validation | `test_update_grade_rejects_injection_payloads` | ValueError / no match |
 
@@ -602,7 +656,7 @@ locally including on x86_64), but it has not yet been executed on GitHub - that 
   own (the account also needs its in-memory password and exists only during a run), but it is a secret on
   disk, protected only by file permissions (`600`).
 * During the few seconds of first initialisation root has an empty password, reachable only through the socket
-  of the temporary server (no networking). If initialisation failed before `05_lockdown.sh`, the container
+  of the temporary server (no networking). If initialisation failed before `06_lockdown.sh`, the container
   would be left in that state; `make reset` starts over.
 * A password typed into `make set-password` / `make sql` is visible to that terminal session's process memory,
   as with any client.
@@ -612,7 +666,8 @@ locally including on x86_64), but it has not yet been executed on GitHub - that 
   client, or database files at rest (no encryption at rest here).
 * Roles and DENY do not restrict root; anyone who can become root (here: `docker exec`) can `REVOKE DENY`.
 * Permissions cannot tell legitimate access from misuse: finance can copy every IBAN it may read.
-* ED25519 does not stop weak passwords (no password-validation plugin is enabled).
+* The password policy does not stop two accounts sharing a password, a password containing the account name, or
+  credentials that existed before the plugins were installed (finding 11).
 * `MariaDB 13.1` is a **preview** release; the findings in section 11 (especially finding 1) may change.
   The Docker tag floats; pin `MARIADB_IMAGE` to a digest for exact reproducibility.
 * The documented hard lockout (PUBLIC DENY on `mysql.global_priv`) is not reproduced.
@@ -633,7 +688,7 @@ locally including on x86_64), but it has not yet been executed on GitHub - that 
 | `ModuleNotFoundError: nacl` / auth plugin error | Use the project venv: `make venv`; ED25519 needs `pymysql[ed25519]`. |
 | A test says `DENY on an inherited role is now enforced immediately` | The server's behaviour changed (finding 1): update section 11 and experiment 2. |
 | An experiment was interrupted and left objects | Re-run it; every file starts by dropping its own leftovers. `make reset` always restores a pristine server. |
-| `05_lockdown.sh: Permission denied` in `docker logs university-db` | `chmod +x sql/05_lockdown.sh`, then `make reset && make demo`. |
+| `06_lockdown.sh: Permission denied` in `docker logs university-db` | `chmod +x sql/06_lockdown.sh`, then `make reset && make demo`. |
 
 ## 17. Repository layout
 
@@ -649,7 +704,8 @@ locally including on x86_64), but it has not yet been executed on GitHub - that 
 │   ├── 02_data.sql              fake data
 │   ├── 03_roles.sql             roles, GRANT, DENY, the my_grades view and its definer
 │   ├── 04_users.sql             ED25519 users, created LOCKED with an unusable key (no password)
-│   └── 05_lockdown.sh           root -> unix_socket; removes the image's healthcheck password file
+│   ├── 05_password_policy.sql   simple_password_check + password_reuse_check
+│   └── 06_lockdown.sh           root -> unix_socket; removes the image's healthcheck password file
 ├── scripts/
 │   └── generate_certs.sh        CA, server and client certificates, keys mode 600
 ├── app/
@@ -689,6 +745,8 @@ Official MariaDB documentation:
 * [GRANT](https://mariadb.com/docs/server/reference/sql-statements/account-management-sql-statements/grant) · [REVOKE](https://mariadb.com/docs/server/reference/sql-statements/account-management-sql-statements/revoke) · [SHOW GRANTS](https://mariadb.com/docs/server/reference/sql-statements/administrative-sql-statements/show/show-grants)
 * [mysql.global_priv table](https://mariadb.com/docs/server/reference/system-tables/the-mysql-database-tables/mysql-global_priv-table)
 * [Roles Overview](https://mariadb.com/docs/server/security/user-account-management/roles/roles_overview) · [CREATE ROLE](https://mariadb.com/docs/server/reference/sql-statements/account-management-sql-statements/create-role)
+* [Password Validation Plugins](https://mariadb.com/docs/server/reference/plugins/password-validation-plugins) · [simple_password_check](https://mariadb.com/docs/server/reference/plugins/password-validation-plugins/simple-password-check-plugin) · [password_reuse_check](https://mariadb.com/docs/server/reference/plugins/password-validation-plugins/password-reuse-check-plugin)
+* [Authentication Plugin - Unix Socket](https://mariadb.com/docs/server/reference/plugins/authentication-plugins/authentication-plugin-unix-socket)
 * [Authentication Plugins](https://mariadb.com/docs/server/reference/plugins/authentication-plugins) · [ed25519](https://mariadb.com/docs/server/reference/plugins/authentication-plugins/authentication-plugin-ed25519) · [PARSEC](https://mariadb.com/docs/server/reference/plugins/authentication-plugins/authentication-plugin-parsec)
 * [Secure Connections Overview](https://mariadb.com/docs/server/security/encryption/data-in-transit-encryption/secure-connections-overview) · [Enabling TLS on MariaDB Server](https://mariadb.com/docs/server/security/encryption/data-in-transit-encryption/data-in-transit-encryption-enabling-tls-on-mariadb-server) · [Securing Connections for Client and Server](https://mariadb.com/docs/server/security/encryption/data-in-transit-encryption/securing-connections-for-client-and-server)
 

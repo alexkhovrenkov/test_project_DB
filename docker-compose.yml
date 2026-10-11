@@ -61,6 +61,10 @@ services:
       # (Connections through the local Unix socket inside the container are
       #  still allowed; that is how "docker exec ... mariadb" works.)
       - --require-secure-transport=ON
+      # Password policy plugins (installed by sql/05_password_policy.sql). "loose-"
+      # lets the very first start, before the plugins exist, ignore these options.
+      - --loose-simple-password-check-minimal-length=12
+      - --loose-password-reuse-check-interval=365       # days a password counts as "used"
 
     # Lets "docker compose up --wait" know when the server is ready.
     healthcheck:
