@@ -3,8 +3,11 @@ A project for area 5, "Authentication and access control" for the [MariaDB stude
 # Protecting a University Database with MariaDB 13.1: Roles, DENY, ED25519 and Verified TLS
 
 **Constructor University** · **Repository:** <https://github.com/alexkhovrenkov/test_project_DB> · **Branch:** `main`
-**MariaDB version:** 13.1.2 (`13.1.2-MariaDB-ubu2604`), Docker image `quay.io/mariadb-foundation/mariadb-devel:13.1`
-(the exact build verified is pinned by digest in [.github/workflows/ci.yml](.github/workflows/ci.yml))
+**MariaDB version:** 13.1.2 (`13.1.2-MariaDB-ubu2604`, a preview release). [docker-compose.yml](docker-compose.yml) uses,
+by default, the exact build all results below come from:
+`quay.io/mariadb-foundation/mariadb-devel@sha256:ed1087249cadb93623dd3b11258ea9790ad8f49c328dae5a5ef726ff1cea2931`.
+To try the newest 13.1 preview build instead, put `MARIADB_IMAGE=quay.io/mariadb-foundation/mariadb-devel:13.1` in
+`.env` (CI does this weekly in its "canary" job).
 
 ```bash
 git clone https://github.com/alexkhovrenkov/test_project_DB.git && cd test_project_DB
@@ -733,8 +736,8 @@ locally including on x86_64), but it has not yet been executed on GitHub - that 
 * Permissions cannot tell legitimate access from misuse: finance can copy every IBAN it may read.
 * The password policy does not stop two accounts sharing a password, a password containing the account name, or
   credentials that existed before the plugins were installed (finding 11).
-* `MariaDB 13.1` is a **preview** release; the findings in section 11 (especially finding 1) may change.
-  The Docker tag floats; pin `MARIADB_IMAGE` to a digest for exact reproducibility.
+* `MariaDB 13.1` is a **preview** release; the findings in section 11 (especially finding 1) may change in newer
+  builds. The project pins the verified build by digest; the floating tag is only used when you choose it.
 * `make` is required (use WSL on Windows). The `university-db` container name is fixed, so two copies of the
   project cannot run at the same time.
 

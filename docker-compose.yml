@@ -9,8 +9,11 @@
 services:
   mariadb:
     # MariaDB 13.1 is needed because it is the first version with DENY.
-    # Override with MARIADB_IMAGE in .env to pin a specific digest.
-    image: ${MARIADB_IMAGE:-quay.io/mariadb-foundation/mariadb-devel:13.1}
+    # By default: the exact 13.1.2 build every result in the README was produced
+    # with (pinned by digest, so a newer preview build cannot change behaviour
+    # under you). To try the newest 13.1 preview build, set in .env:
+    #   MARIADB_IMAGE=quay.io/mariadb-foundation/mariadb-devel:13.1
+    image: ${MARIADB_IMAGE:-quay.io/mariadb-foundation/mariadb-devel@sha256:ed1087249cadb93623dd3b11258ea9790ad8f49c328dae5a5ef726ff1cea2931}
     container_name: ${MARIADB_CONTAINER:-university-db}
 
     # No password is configured anywhere. The entrypoint creates root@localhost
