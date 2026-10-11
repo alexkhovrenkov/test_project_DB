@@ -10,7 +10,7 @@ same behaviours are also shown step by step in experiments/*.sql.
 import pytest
 
 from conftest import ACCESS_DENIED_COLUMN, ACCESS_DENIED_TABLE, error_code
-from database import connect_root, run_query
+from database import run_query
 
 NO_SUCH_GRANT_DB, NO_SUCH_GRANT_TABLE = 1141, 1147
 INVALID_ROLE = 1959
@@ -273,16 +273,17 @@ def test_a_database_deny_survives_drop_database(lab):
     assert any(row[0].startswith("DENY SELECT") for row in lab.run(f"SHOW GRANTS FOR {role}"))
 
 
-def test_public_deny_locks_out_root_until_revoked(lab, root):
+def test_public_deny_locks_out_the_administrator_until_revoked(lab, harness):
+    """PUBLIC means everyone - including the administrator who issued the DENY."""
     lab.public_deny(f"{lab.db}.*")
-    fresh_root = connect_root(database=None)
+    fresh_admin = harness.connect()
     try:
-        assert error_code(lambda: read(fresh_root, lab.db)) == ACCESS_DENIED_TABLE
+        assert error_code(lambda: read(fresh_admin, lab.db)) == ACCESS_DENIED_TABLE
     finally:
-        fresh_root.close()
+        fresh_admin.close()
     lab.run(f"REVOKE DENY SELECT ON {lab.db}.* FROM PUBLIC")
     lab.public_denies.clear()
-    again = connect_root(database=None)
+    again = harness.connect()
     try:
         assert read(again, lab.db)
     finally:

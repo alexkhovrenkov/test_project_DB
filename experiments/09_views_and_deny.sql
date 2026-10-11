@@ -36,7 +36,7 @@ SELECT * FROM exp_lab.v_definer;
 SELECT * FROM exp_lab.v_invoker;
 
 -- ===== What a DENY on the definer does =====
--- @as root
+-- @as dba
 DENY SELECT ON exp_lab.t_base TO exp_definer@'%';
 
 -- @as exp_viewer
@@ -44,11 +44,11 @@ DENY SELECT ON exp_lab.t_base TO exp_definer@'%';
 -- @expect error 1356
 SELECT * FROM exp_lab.v_definer;
 
--- @as root
+-- @as dba
 REVOKE DENY SELECT ON exp_lab.t_base FROM exp_definer@'%';
 
 -- ===== How to actually cut off a view =====
--- @as root
+-- @as dba
 DENY SELECT ON exp_lab.v_definer TO exp_viewer@'%';
 
 -- @as exp_viewer
@@ -60,7 +60,7 @@ SELECT * FROM exp_lab.v_definer;
 -- @takeaway Treat definer views as privilege delegation: grant on them deliberately, and keep the definer's own privileges minimal. The project's my_grades view is defined by a dedicated locked account that can only SELECT three tables (sql/03_roles.sql), not by root.
 
 -- @phase cleanup
--- @as root
+-- @as dba
 DROP DATABASE exp_lab;
 DROP USER exp_definer@'%';
 DROP USER exp_viewer@'%';

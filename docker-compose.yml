@@ -4,22 +4,24 @@
 #   docker compose up -d --wait   start it (and wait until it is healthy)
 #   docker compose down -v        stop it AND delete the data (full reset)
 #
-# Values like ${MARIADB_ROOT_PASSWORD} are read from the .env file.
+# Optional, non-secret settings (port, container name, image) can be put in .env.
 
 services:
   mariadb:
     # MariaDB 13.1 is needed because it is the first version with DENY.
     # Override with MARIADB_IMAGE in .env to pin a specific digest.
     image: ${MARIADB_IMAGE:-quay.io/mariadb-foundation/mariadb-devel:13.1}
-    container_name: university-db
+    container_name: ${MARIADB_CONTAINER:-university-db}
 
+    # No password is configured anywhere. The entrypoint creates root@localhost
+    # with an empty password, reachable only through the socket of the
+    # temporary init server (which runs with --skip-networking); no root@'%'
+    # account is created. The last init script (sql/05_lockdown.sh) switches
+    # root to unix_socket authentication, so after init root has no password
+    # at all and can only be used via "docker exec" (make shell).
     environment:
-      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?run "make env" first}
-      # Read by sql/04_users.sh when the demo users are created.
-      STUDENT_PASSWORD: ${STUDENT_PASSWORD:?run "make env" first}
-      PROFESSOR_PASSWORD: ${PROFESSOR_PASSWORD:?run "make env" first}
-      FINANCE_PASSWORD: ${FINANCE_PASSWORD:?run "make env" first}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?run "make env" first}
+      MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "1"
+      MARIADB_ROOT_HOST: localhost
 
     # Only reachable from this computer (127.0.0.1), never from the network.
     ports:

@@ -31,7 +31,7 @@ SELECT * FROM university.no_such_table;
 -- @expect excludes DENY
 SHOW GRANTS;
 
--- @as root
+-- @as dba
 -- @why ... while the administrator sees the DENY as a separate line, for audits.
 -- @expect contains DENY SELECT ON `university`.`financial_records`
 SHOW GRANTS FOR professor_role;

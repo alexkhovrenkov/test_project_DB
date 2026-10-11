@@ -43,7 +43,7 @@ jobs:
           cache-dependency-path: requirements*.txt
 
       - name: Lint shell scripts
-        run: shellcheck scripts/*.sh sql/04_users.sh
+        run: shellcheck scripts/*.sh sql/*.sh
 
       - name: Start MariaDB 13.1 (random passwords, fresh certificates, TLS on)
         run: make up

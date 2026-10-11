@@ -3,7 +3,8 @@
 Five short, runnable lessons. Each `.sql` file is ordinary SQL plus a few comment
 lines the runner understands (`-- @as`, `-- @expect`, `-- @why`, ...; the full list is at the top of
 [app/sqlrunner.py](../app/sqlrunner.py)). Every statement really runs on the MariaDB 13.1 server,
-**as the user named by the last `-- @as` line**, over a verified TLS connection.
+**as the user named by the last `-- @as` line**, over a verified TLS connection. `dba` is the run's
+short-lived administrator (see section 8 of the main README); the demo accounts get random in-memory passwords.
 For every step you see the SQL, what the file expected, what MariaDB answered, and PASS or FAIL.
 
 | File | You learn |
@@ -23,10 +24,11 @@ make examples                                          # all five
 hand, open one session per identity and paste the statements for that identity:
 
 ```bash
-# as root (the administrator): the password is MARIADB_ROOT_PASSWORD in .env
-docker exec -it university-db mariadb -uroot -p
-# as another user created by the lesson, e.g. tut_ann: replace {{pw}} in the CREATE USER by a password of your choice
-docker exec -it university-db mariadb -utut_ann -p
+# for the "-- @as dba" steps: root, through the container socket - no password (unix_socket)
+make shell
+# as a user the lesson creates, e.g. tut_ann: replace '{{pw}}' in its CREATE USER by a password of your
+# choice (12+ characters with upper and lower case, a digit and a symbol), then
+docker exec -it university-db mariadb -u tut_ann -p
 ```
 
 The lessons only touch a scratch database called `tutorial` and accounts starting with `tut_`; each

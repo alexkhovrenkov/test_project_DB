@@ -36,12 +36,19 @@ def test_no_secrets_or_keys_are_tracked_by_git():
         assert not pem_header.search(path.read_text(errors="ignore")), f"private key material in {path.name}"
 
 
-def test_env_file_is_ignored_and_not_a_placeholder():
+def test_generated_secrets_are_ignored_by_git():
     tracked_files()   # skips when this is not a git checkout
-    ignored = subprocess.run(["git", "check-ignore", ".env", "certs/server-key.pem"], cwd=PROJECT,
-                             capture_output=True, text=True)
-    assert set(ignored.stdout.split()) == {".env", "certs/server-key.pem"}
-    assert "change-me" not in (PROJECT / ".env").read_text(), "run 'make clean' and 'make env' for real passwords"
+    ignored = subprocess.run(["git", "check-ignore", ".env", "certs/server-key.pem", "certs/client-key.pem"],
+                             cwd=PROJECT, capture_output=True, text=True)
+    assert set(ignored.stdout.split()) == {".env", "certs/server-key.pem", "certs/client-key.pem"}
+
+
+def test_no_interpolated_password_in_sql_or_shell():
+    """The old 04_users.sh pasted $PASSWORD into a heredoc. Nothing may do that again."""
+    marker = "PASSWORD('" + "$"   # split so this file does not match itself
+    for path in tracked_files():
+        if path.suffix in {".sql", ".sh", ".py"}:
+            assert marker not in path.read_text(), f"interpolated password in {path.name}"
 
 
 def test_no_hardcoded_passwords_in_tracked_code():

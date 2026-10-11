@@ -52,7 +52,7 @@ INSERT INTO exp_lab.t (id, pub, secret) VALUES (2, 'public-2', 'planted-by-exp_u
 -- @expect contains secret
 SHOW COLUMNS FROM exp_lab.t;
 
--- @as root
+-- @as dba
 DENY INSERT (secret) ON exp_lab.t TO exp_u@'%';
 
 -- @as exp_u
@@ -79,6 +79,6 @@ SELECT COUNT(*) FROM exp_lab.t;
 -- @takeaway It does not hide the column's name (SHOW CREATE TABLE) or the table's row count, and the column stays listed - and writable at INSERT - until every privilege on it is denied.
 
 -- @phase cleanup
--- @as root
+-- @as dba
 DROP DATABASE exp_lab;
 DROP USER exp_u@'%';

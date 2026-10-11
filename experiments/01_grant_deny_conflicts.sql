@@ -22,7 +22,7 @@ SET DEFAULT ROLE exp_r FOR exp_u@'%';
 -- ===== Case A: broad GRANT, then DENY one table =====
 GRANT SELECT ON exp_lab.* TO exp_r;
 -- @phase demo
--- @as root
+-- @as dba
 DENY SELECT ON exp_lab.t1 TO exp_r;
 
 -- @as exp_u
@@ -36,10 +36,10 @@ SELECT * FROM exp_lab.t2;
 
 -- ===== Case B: order of statements =====
 -- @phase setup
--- @as root
+-- @as dba
 REVOKE ALL PRIVILEGES, GRANT OPTION FROM exp_r;
 -- @phase demo
--- @as root
+-- @as dba
 DENY SELECT ON exp_lab.t2 TO exp_r;
 GRANT SELECT ON exp_lab.t2 TO exp_r;
 
@@ -50,10 +50,10 @@ SELECT * FROM exp_lab.t2;
 
 -- ===== Case C: DENY at database level masks a GRANT at table level =====
 -- @phase setup
--- @as root
+-- @as dba
 REVOKE ALL PRIVILEGES, GRANT OPTION FROM exp_r;
 -- @phase demo
--- @as root
+-- @as dba
 GRANT SELECT ON exp_lab.t1 TO exp_r;
 DENY SELECT ON exp_lab.* TO exp_r;
 
@@ -64,10 +64,10 @@ SELECT * FROM exp_lab.t1;
 
 -- ===== Case D: DENY at table level masks a GRANT at column level =====
 -- @phase setup
--- @as root
+-- @as dba
 REVOKE ALL PRIVILEGES, GRANT OPTION FROM exp_r;
 -- @phase demo
--- @as root
+-- @as dba
 GRANT SELECT (pub) ON exp_lab.t1 TO exp_r;
 DENY SELECT ON exp_lab.t1 TO exp_r;
 
@@ -78,10 +78,10 @@ SELECT pub FROM exp_lab.t1;
 
 -- ===== Case E: a DENY only removes what it names =====
 -- @phase setup
--- @as root
+-- @as dba
 REVOKE ALL PRIVILEGES, GRANT OPTION FROM exp_r;
 -- @phase demo
--- @as root
+-- @as dba
 GRANT SELECT, INSERT ON exp_lab.t2 TO exp_r;
 DENY INSERT ON exp_lab.t2 TO exp_r;
 
@@ -98,7 +98,7 @@ INSERT INTO exp_lab.t2 VALUES (2, 'value-2');
 -- @takeaway The flip side: an accidental DENY cannot be fixed by granting more. Only REVOKE DENY (at the same level) repairs it.
 
 -- @phase cleanup
--- @as root
+-- @as dba
 DROP DATABASE exp_lab;
 DROP USER exp_u@'%';
 DROP ROLE exp_r;

@@ -48,7 +48,7 @@ SELECT * FROM tutorial.projects;
 SET ROLE tut_reader;
 
 -- @phase cleanup
--- @as root
+-- @as dba
 DROP DATABASE tutorial;
 DROP USER tut_ann@'%';
 DROP ROLE tut_reader;

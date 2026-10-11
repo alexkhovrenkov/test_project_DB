@@ -45,7 +45,7 @@ SELECT id, name FROM tutorial.employees;
 SHOW COLUMNS FROM tutorial.employees;
 
 -- Undo it. A column DENY must be revoked at column level.
--- @as root
+-- @as dba
 REVOKE DENY SELECT (salary) ON tutorial.employees FROM tut_bob@'%';
 
 -- @as tut_bob
@@ -53,7 +53,7 @@ REVOKE DENY SELECT (salary) ON tutorial.employees FROM tut_bob@'%';
 SELECT * FROM tutorial.employees;
 
 -- @phase cleanup
--- @as root
+-- @as dba
 DROP DATABASE tutorial;
 DROP USER tut_ann@'%';
 DROP USER tut_bob@'%';

@@ -49,9 +49,9 @@ def test_professor_cannot_insert_or_delete_grades(professor):
     assert error_code(lambda: run_query(professor, "DELETE FROM grades WHERE grade_id = 1")) == ACCESS_DENIED_TABLE
 
 
-def test_deny_beats_a_later_table_level_grant(root):
+def test_deny_beats_a_later_table_level_grant(dba):
     """The project's headline DENY property: an administrator's later GRANT cannot undo it."""
-    run_query(root, "GRANT SELECT ON university.financial_records TO professor_role")
+    run_query(dba, "GRANT SELECT ON university.financial_records TO professor_role")
     try:
         fresh_professor = connect_as("professor")   # a brand-new login, after the GRANT
         try:
@@ -60,7 +60,7 @@ def test_deny_beats_a_later_table_level_grant(root):
         finally:
             fresh_professor.close()
     finally:
-        run_query(root, "REVOKE SELECT ON university.financial_records FROM professor_role")
+        run_query(dba, "REVOKE SELECT ON university.financial_records FROM professor_role")
 
 
 def test_professor_join_cannot_reach_the_denied_table(professor):
@@ -75,16 +75,16 @@ def test_denied_table_is_hidden_from_show_tables(professor, student):
     assert {row[0] for row in run_query(student, "SHOW TABLES")} == {"courses", "my_grades"}
 
 
-def test_deny_is_visible_to_the_administrator_but_not_to_the_denied_user(root, professor):
-    root_lines = [row[0] for row in run_query(root, "SHOW GRANTS FOR professor_role")]
-    assert "DENY SELECT ON `university`.`financial_records` TO `professor_role`" in root_lines
+def test_deny_is_visible_to_the_administrator_but_not_to_the_denied_user(dba, professor):
+    admin_lines = [row[0] for row in run_query(dba, "SHOW GRANTS FOR professor_role")]
+    assert "DENY SELECT ON `university`.`financial_records` TO `professor_role`" in admin_lines
     own_lines = [row[0] for row in run_query(professor, "SHOW GRANTS")]
     assert not any(line.startswith("DENY") for line in own_lines)
 
 
-def test_deny_is_stored_in_global_priv_as_json(root):
+def test_deny_is_stored_in_global_priv_as_json(dba):
     """README claim: denies live in the 'denies' key of mysql.global_priv, not in the old grant tables."""
-    (priv,) = run_query(root, "SELECT Priv FROM mysql.global_priv WHERE User = 'professor_role'")[0]
+    (priv,) = run_query(dba, "SELECT Priv FROM mysql.global_priv WHERE User = 'professor_role'")[0]
     assert '"denies"' in priv and "financial_records" in priv
 
 
@@ -113,16 +113,16 @@ def test_parameters_are_data_not_sql(professor):
     assert rows == ()
 
 
-def test_my_grades_view_is_defined_by_a_locked_read_only_account(root):
+def test_my_grades_view_is_defined_by_a_locked_read_only_account(dba):
     """The view lends its DEFINER's rights to students, so the definer must be tiny and unable to log in."""
-    definer = run_query(root, "SELECT definer, security_type FROM information_schema.views "
+    definer = run_query(dba, "SELECT definer, security_type FROM information_schema.views "
                               "WHERE table_schema = 'university' AND table_name = 'my_grades'")[0]
     assert definer == ("my_grades_owner@localhost", "DEFINER")
     privileges = {(schema_table, privilege) for schema_table, privilege in run_query(
-        root, "SELECT table_name, privilege_type FROM information_schema.table_privileges "
+        dba, "SELECT table_name, privilege_type FROM information_schema.table_privileges "
               "WHERE grantee = \"'my_grades_owner'@'localhost'\"")}
     assert privileges == {(table, "SELECT") for table in ("grades", "students", "courses")}
-    locked = run_query(root, "SELECT JSON_EXTRACT(Priv, '$.account_locked') FROM mysql.global_priv "
+    locked = run_query(dba, "SELECT JSON_EXTRACT(Priv, '$.account_locked') FROM mysql.global_priv "
                              "WHERE User = 'my_grades_owner'")[0][0]
     assert locked == "true"
     # Reachable from nowhere on the network either: the account only exists for host 'localhost'.

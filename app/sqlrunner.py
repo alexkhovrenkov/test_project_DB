@@ -17,8 +17,10 @@ Directives (all start with "-- @"):
     @goal <text>             what you learn / what is investigated (repeatable)
     @phase setup|demo|cleanup  setup and cleanup steps are printed in one line
                              each; "demo" steps get the full expected/actual box
-    @as <account>            run the following statements as this MariaDB account
-                             (root, alice_student, ... or a user the file creates)
+    @as <account>            run the following statements as this MariaDB account:
+                             "dba" (the run's short-lived administrator, see
+                             app/admin.py), a demo account such as alice_student,
+                             or a user the file creates
     @reconnect               close and reopen the current account's connection
                              (global privileges are read at connection time)
     @login <account> [wrong] try to log in; the step is the login itself.
@@ -29,22 +31,24 @@ Directives (all start with "-- @"):
     @why <text>              explanation printed under the next step (repeatable)
     @takeaway <text>         security implication, printed at the end (repeatable)
 
-Placeholders: {{pw}} in a statement is replaced with a random password that is
-generated for each run, so example files never contain a credential.
+Placeholders: '{{pw}}' in a statement stands for a random password generated
+for each run, so example files never contain a credential. It is sent as a
+driver parameter (%s), not pasted into the SQL text.
 """
 
 import argparse
 import re
-import secrets
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pymysql
 
-from database import ACCOUNTS, ConfigError, connect, password_from_env
+from admin import Harness, SocketSQLError
+from database import ACCOUNTS, ConfigError, connect, password_for, strong_password
 
-DEMO_PASSWORDS = {user: variable for user, variable in ACCOUNTS.values()}
+DEMO_USERS = set(ACCOUNTS.values())
+ADMIN = "dba"   # the alias the .sql files use for the run's harness account
 MAX_ROWS_SHOWN = 8
 
 
@@ -79,7 +83,7 @@ DIRECTIVE = re.compile(r"^--\s*@(\w+)\s*(.*)$")
 def parse(path):
     """Turn a .sql file into a Script."""
     script = Script(Path(path))
-    account, phase = "root", "demo"
+    account, phase = ADMIN, "demo"
     expect, why, reconnect = "ok", [], False
     buffer = []
 
@@ -136,25 +140,32 @@ def parse(path):
 class Session:
     """Keeps one open connection per account for the duration of a script."""
 
-    def __init__(self, run_password):
+    def __init__(self, harness, run_password):
+        self.harness = harness
         self.run_password = run_password   # random, for accounts the script creates
         self.connections = {}
         self.roles = {}
 
+    def display(self, account):
+        return f"{ADMIN} ({self.harness.name})" if account == ADMIN else account
+
     def password(self, account, wrong=False):
         if wrong:
             return "definitely-not-the-password"
-        if account == "root":
-            return password_from_env("MARIADB_ROOT_PASSWORD")
-        if account in DEMO_PASSWORDS:
-            return password_from_env(DEMO_PASSWORDS[account])
+        if account in DEMO_USERS:
+            return password_for(account)
         return self.run_password
+
+    def open(self, account, password):
+        if account == ADMIN:
+            return self.harness.connect()
+        return connect(account, password, database=None)
 
     def connection(self, account, fresh=False):
         if fresh:
             self.drop(account)
         if account not in self.connections:
-            self.connections[account] = connect(account, self.password(account), database=None)
+            self.connections[account] = self.open(account, self.password(account))
             self.refresh_role(account)
         return self.connections[account]
 
@@ -195,12 +206,15 @@ def execute(step, session):
     try:
         if step.kind == "login":
             password = session.password(step.account, wrong=bool(step.login_mode))
-            connect(step.account, password, database=None).close()
+            session.open(step.account, password).close()
             return "ok", []
         connection = session.connection(step.account, fresh=step.reconnect_first)
-        sql = step.text.replace("{{pw}}", session.run_password)
+        sql, params = step.text, None
+        if "'{{pw}}'" in sql:
+            # The password becomes a driver parameter: %s, with any literal % doubled.
+            sql, params = sql.replace("%", "%%").replace("'{{pw}}'", "%s"), (session.run_password,)
         with connection.cursor() as cursor:
-            cursor.execute(sql)
+            cursor.execute(sql, params)
             rows = list(cursor.fetchall()) if cursor.description else []
         if re.match(r"\s*SET\s+(DEFAULT\s+)?ROLE", sql, re.IGNORECASE):
             session.refresh_role(step.account)
@@ -244,10 +258,10 @@ def one_line(sql):
     return " ".join(sql.split())
 
 
-def run_script(path, quiet=False, out=print):
-    """Run one file. Returns (passed, failed) step counts."""
+def run_script(path, harness, quiet=False, out=print):
+    """Run one file with the given admin.Harness. Returns (passed, failed) step counts."""
     script = parse(path)
-    session = Session(secrets.token_hex(12))
+    session = Session(harness, strong_password())
     passed = failed = 0
     if not quiet:
         out("")
@@ -274,13 +288,13 @@ def run_script(path, quiet=False, out=print):
                 continue
             number += 1
             if quiet:
-                out(f"  [{verdict}] step {number} as {step.account}: {one_line(step.text)[:90]}")
+                out(f"  [{verdict}] step {number} as {session.display(step.account)}: {one_line(step.text)[:90]}")
                 if not ok:
                     out(f"         expected {step.expect!r}, got {summarize(outcome, rows)!r}")
                 continue
             role = session.roles.get(step.account, "none")
             out("")
-            out(f"Step {number}  user: {step.account}  (active role: {role})")
+            out(f"Step {number}  user: {session.display(step.account)}  (active role: {role})")
             for sql_line in step.text.splitlines():
                 out(f"    SQL      {sql_line.strip()}")
             out(f"    Expected {step.expect}")
@@ -317,10 +331,12 @@ def main(argv=None):
 
     total_passed = total_failed = 0
     try:
-        for file in collect(arguments.paths):
-            passed, failed = run_script(file, quiet=arguments.quiet)
-            total_passed, total_failed = total_passed + passed, total_failed + failed
-    except (ConfigError, ScriptError) as error:
+        with Harness() as harness:
+            harness.activate_demo_accounts()
+            for file in collect(arguments.paths):
+                passed, failed = run_script(file, harness, quiet=arguments.quiet)
+                total_passed, total_failed = total_passed + passed, total_failed + failed
+    except (ConfigError, ScriptError, SocketSQLError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
     except pymysql.MySQLError as error:

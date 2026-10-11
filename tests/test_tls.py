@@ -8,7 +8,7 @@ import pymysql
 import pytest
 
 from conftest import error_code
-from database import CERTS_DIR, PORT, connect, password_from_env, run_query
+from database import CERTS_DIR, PORT, connect, password_for, run_query
 
 CONNECT_ERROR = 2003            # client could not set up the connection
 INSECURE_TRANSPORT = 3159       # server: "Connections using insecure transport are prohibited"
@@ -18,7 +18,7 @@ USER = "smith_professor"
 
 @pytest.fixture(scope="module")
 def password():
-    return password_from_env("PROFESSOR_PASSWORD")
+    return password_for(USER)
 
 
 def message_of(callable_):
@@ -39,12 +39,12 @@ def test_verified_connection_uses_modern_tls(password):
     assert status["Ssl_cipher"]
 
 
-def test_server_only_offers_tls_1_2_and_1_3(root):
-    assert run_query(root, "SHOW VARIABLES LIKE 'tls_version'")[0][1] == "TLSv1.2,TLSv1.3"
+def test_server_only_offers_tls_1_2_and_1_3(dba):
+    assert run_query(dba, "SHOW VARIABLES LIKE 'tls_version'")[0][1] == "TLSv1.2,TLSv1.3"
 
 
-def test_server_requires_secure_transport(root):
-    assert run_query(root, "SHOW VARIABLES LIKE 'require_secure_transport'")[0][1] == "ON"
+def test_server_requires_secure_transport(dba):
+    assert run_query(dba, "SHOW VARIABLES LIKE 'require_secure_transport'")[0][1] == "ON"
 
 
 def test_client_trusting_a_different_ca_refuses_the_server(password):
@@ -68,9 +68,10 @@ def test_plaintext_connection_is_refused_by_the_server(password):
                                               ssl_disabled=True)) == INSECURE_TRANSPORT
 
 
-def test_plaintext_connection_is_refused_for_root_too():
+def test_plaintext_connection_is_refused_for_the_administrator_too(harness):
+    """Even the harness administrator, with its client certificate, cannot skip TLS."""
     assert error_code(lambda: pymysql.connect(
-        host="localhost", port=PORT, user="root", password=password_from_env("MARIADB_ROOT_PASSWORD"),
+        host="localhost", port=PORT, user=harness.name, password=harness.password,
         ssl_disabled=True)) == INSECURE_TRANSPORT
 
 

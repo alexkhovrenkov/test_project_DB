@@ -22,8 +22,8 @@ def test_scripts_were_found():
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda path: f"{path.parent.name}/{path.name}")
-def test_script_behaves_as_documented(script):
+def test_script_behaves_as_documented(script, harness):
     lines = []
-    passed, failed = run_script(script, quiet=True, out=lines.append)
+    passed, failed = run_script(script, harness, quiet=True, out=lines.append)
     assert failed == 0, "\n".join(lines)
     assert passed > 5, "a script with almost no checked steps proves nothing"

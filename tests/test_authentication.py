@@ -10,18 +10,18 @@ import pymysql
 import pytest
 
 from conftest import error_code
-from database import ACCOUNTS, connect, connect_as, password_from_env, run_query
+from database import ACCOUNTS, connect, connect_as, password_for, run_query
 
 ACCESS_DENIED = 1045      # "Access denied for user ..." - the login itself failed
 ACCOUNT_LOCKED = 4151
 PASSWORD_EXPIRED = 1820
 
 
-def test_every_password_account_uses_ed25519(root):
-    names = [user for user, _ in ACCOUNTS.values()] + ["root"]
-    rows = run_query(root, "SELECT user, host, plugin FROM mysql.user WHERE user IN %s", (names,))
-    assert len(rows) == len(names) + 1, "expected the 4 demo users plus root@localhost and root@%"
-    assert {plugin for _, _, plugin in rows} == {"ed25519"}
+def test_every_demo_account_uses_ed25519(dba):
+    names = list(ACCOUNTS.values())
+    rows = run_query(dba, "SELECT user, plugin FROM mysql.user WHERE user IN %s", (names,))
+    assert sorted(user for user, _ in rows) == sorted(names)
+    assert {plugin for _, plugin in rows} == {"ed25519"}
 
 
 @pytest.mark.parametrize("role", list(ACCOUNTS))
@@ -29,7 +29,7 @@ def test_correct_password_logs_in_as_the_expected_user(role):
     connection = connect_as(role)
     try:
         user = run_query(connection, "SELECT CURRENT_USER()")[0][0]
-        assert user == f"{ACCOUNTS[role][0]}@%"
+        assert user == f"{ACCOUNTS[role]}@%"
         assert run_query(connection, "SELECT CURRENT_ROLE()")[0][0] == f"{role}_role"
     finally:
         connection.close()
@@ -37,7 +37,7 @@ def test_correct_password_logs_in_as_the_expected_user(role):
 
 @pytest.mark.parametrize("role", list(ACCOUNTS))
 def test_wrong_password_is_rejected(role):
-    assert error_code(lambda: connect(ACCOUNTS[role][0], "definitely-not-the-password")) == ACCESS_DENIED
+    assert error_code(lambda: connect(ACCOUNTS[role], "definitely-not-the-password")) == ACCESS_DENIED
 
 
 def test_empty_password_is_rejected():
@@ -45,7 +45,7 @@ def test_empty_password_is_rejected():
 
 
 def test_password_of_another_user_is_rejected():
-    assert error_code(lambda: connect("smith_professor", password_from_env("STUDENT_PASSWORD"))) == ACCESS_DENIED
+    assert error_code(lambda: connect("smith_professor", password_for("alice_student"))) == ACCESS_DENIED
 
 
 def test_unknown_user_and_wrong_password_look_identical():
@@ -58,18 +58,18 @@ def test_unknown_user_and_wrong_password_look_identical():
     assert failure("smith_professor") == failure("no_such_user_" + secrets.token_hex(3))
 
 
-def test_stolen_authentication_string_cannot_be_used_as_a_password(root):
+def test_stolen_authentication_string_cannot_be_used_as_a_password(dba):
     """ED25519 stores a PUBLIC key; knowing it is not enough to log in."""
-    stored = run_query(root, "SELECT authentication_string FROM mysql.user WHERE user = 'smith_professor'")[0][0]
-    assert stored and stored != password_from_env("PROFESSOR_PASSWORD")
+    stored = run_query(dba, "SELECT authentication_string FROM mysql.user WHERE user = 'smith_professor'")[0][0]
+    assert stored and stored != password_for("smith_professor")
     assert error_code(lambda: connect("smith_professor", stored)) == ACCESS_DENIED
 
 
-def test_password_is_not_stored_anywhere_in_clear_text(root):
-    password = password_from_env("PROFESSOR_PASSWORD")
-    for (stored,) in run_query(root, "SELECT authentication_string FROM mysql.user"):
+def test_password_is_not_stored_anywhere_in_clear_text(dba):
+    password = password_for("smith_professor")
+    for (stored,) in run_query(dba, "SELECT authentication_string FROM mysql.user"):
         assert password not in (stored or "")
-    for (priv,) in run_query(root, "SELECT Priv FROM mysql.global_priv"):
+    for (priv,) in run_query(dba, "SELECT Priv FROM mysql.global_priv"):
         assert password not in priv
 
 

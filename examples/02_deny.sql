@@ -26,10 +26,10 @@ GRANT SELECT ON tutorial.* TO tut_analyst;
 SELECT * FROM tutorial.employees;
 
 -- ... "except the employees table". One statement, no list of allowed tables.
--- @as root
+-- @as dba
 DENY SELECT ON tutorial.employees TO tut_analyst;
 
--- @as root
+-- @as dba
 -- @why DENY shows up as its own line in SHOW GRANTS (visible to accounts that can read the mysql database).
 -- @expect contains DENY SELECT
 SHOW GRANTS FOR tut_analyst;
@@ -48,7 +48,7 @@ SELECT * FROM tutorial.projects;
 SHOW TABLES FROM tutorial;
 
 -- The administrator now tries to "fix" it with a more specific GRANT.
--- @as root
+-- @as dba
 GRANT SELECT ON tutorial.employees TO tut_analyst;
 
 -- @as tut_ann
@@ -57,7 +57,7 @@ GRANT SELECT ON tutorial.employees TO tut_analyst;
 SELECT * FROM tutorial.employees;
 
 -- Only REVOKE DENY removes a DENY. Plain REVOKE removes grants, not denies.
--- @as root
+-- @as dba
 REVOKE SELECT ON tutorial.employees FROM tut_analyst;
 -- @why Plain REVOKE removed only the explicit GRANT. The DENY needs REVOKE DENY, at exactly the same level (table).
 REVOKE DENY SELECT ON tutorial.employees FROM tut_analyst;
@@ -68,7 +68,7 @@ REVOKE DENY SELECT ON tutorial.employees FROM tut_analyst;
 SELECT * FROM tutorial.employees;
 
 -- @phase cleanup
--- @as root
+-- @as dba
 DROP DATABASE tutorial;
 DROP USER tut_ann@'%';
 DROP ROLE tut_analyst;

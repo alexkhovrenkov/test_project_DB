@@ -8,7 +8,7 @@ DROP USER IF EXISTS tut_ann@'%';
 CREATE USER tut_ann@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
 
 -- @phase demo
--- @as root
+-- @as dba
 -- @why MariaDB stored an ed25519 PUBLIC key, not a password hash. We print the plugin name only (never the stored value).
 -- @expect contains ed25519
 SELECT user, plugin FROM mysql.user WHERE user = 'tut_ann';
@@ -24,14 +24,14 @@ SELECT user, plugin FROM mysql.user WHERE user = 'tut_ann';
 -- @expect error 1045
 -- @login nobody_here wrong
 
--- @as root
+-- @as dba
 ALTER USER tut_ann@'%' ACCOUNT LOCK;
 
 -- @why Even the correct password fails while the account is locked: error 4151.
 -- @expect error 4151
 -- @login tut_ann
 
--- @as root
+-- @as dba
 ALTER USER tut_ann@'%' ACCOUNT UNLOCK;
 ALTER USER tut_ann@'%' PASSWORD EXPIRE;
 
@@ -41,5 +41,5 @@ ALTER USER tut_ann@'%' PASSWORD EXPIRE;
 SELECT 1;
 
 -- @phase cleanup
--- @as root
+-- @as dba
 DROP USER tut_ann@'%';

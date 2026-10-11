@@ -17,7 +17,7 @@ CREATE USER exp_u@'%' IDENTIFIED VIA ed25519 USING PASSWORD('{{pw}}');
 
 -- @phase demo
 -- ===== Mistake 1: the role is granted, but SET DEFAULT ROLE is forgotten =====
--- @as root
+-- @as dba
 GRANT exp_r TO exp_u@'%';
 
 -- @as exp_u
@@ -25,7 +25,7 @@ GRANT exp_r TO exp_u@'%';
 -- @expect error 1142 pub_t
 SELECT * FROM exp_lab.pub_t;
 
--- @as root
+-- @as dba
 -- @why Diagnosis: SHOW GRANTS lists the role, but there is no SET DEFAULT ROLE line.
 -- @expect excludes SET DEFAULT ROLE
 SHOW GRANTS FOR exp_u@'%';
@@ -39,7 +39,7 @@ SET DEFAULT ROLE exp_r FOR exp_u@'%';
 SELECT * FROM exp_lab.pub_t;
 
 -- ===== Mistake 2: GRANT ALL on the whole database instead of one table =====
--- @as root
+-- @as dba
 GRANT ALL PRIVILEGES ON exp_lab.* TO exp_r;
 
 -- @as exp_u
@@ -47,7 +47,7 @@ GRANT ALL PRIVILEGES ON exp_lab.* TO exp_r;
 -- @expect rows 1
 SELECT * FROM exp_lab.secret_t;
 
--- @as root
+-- @as dba
 -- @why Detection: audit the grants from the privilege tables. information_schema.schema_privileges lists database-wide grants.
 -- @expect contains exp_r
 SELECT grantee, table_schema, privilege_type FROM information_schema.schema_privileges WHERE table_schema = 'exp_lab' AND privilege_type = 'SELECT';
@@ -60,20 +60,20 @@ REVOKE ALL PRIVILEGES ON exp_lab.* FROM exp_r;
 SELECT * FROM exp_lab.secret_t;
 
 -- ===== Mistake 3: DENY ... TO PUBLIC =====
--- @as root
+-- @as dba
 -- @why PUBLIC means every account, including the administrator who types it. (Here limited to the scratch database; a global PUBLIC DENY is far worse - see Limitations in the README.)
 DENY SELECT ON exp_lab.* TO PUBLIC;
 
--- @why Privileges of an OPEN session are not recomputed: root still works in the session that issued the DENY ...
+-- @why Privileges of an OPEN session are not recomputed: the administrator (dba) still works in the session that issued the DENY ...
 -- @expect rows 1
 SELECT * FROM exp_lab.pub_t;
 
 -- @reconnect
--- @why ... but after reconnecting, root is locked out of the data too.
+-- @why ... but after reconnecting, the administrator is locked out of the data too.
 -- @expect error 1142 pub_t
 SELECT * FROM exp_lab.pub_t;
 
--- @why Recovery: root can still lift a PUBLIC deny (the documented exception: REVOKE DENY ... FROM PUBLIC works with UPDATE on mysql.global_priv).
+-- @why Recovery: the administrator can still lift a PUBLIC deny (the documented exception: REVOKE DENY ... FROM PUBLIC works with UPDATE on mysql.global_priv).
 REVOKE DENY SELECT ON exp_lab.* FROM PUBLIC;
 
 -- @reconnect
@@ -84,7 +84,7 @@ SELECT * FROM exp_lab.pub_t;
 -- @takeaway A PUBLIC DENY is the sharpest edge of the feature. The official docs warn that denying UPDATE on mysql.global_priv to PUBLIC removes even the recovery path; that case is NOT reproduced here because recovering needs a server restart with privilege checks disabled.
 
 -- @phase cleanup
--- @as root
+-- @as dba
 DROP DATABASE exp_lab;
 DROP USER exp_u@'%';
 DROP ROLE exp_r;

@@ -22,7 +22,7 @@ DENY SELECT ON exp_lab.t TO exp_r;
 SELECT * FROM exp_lab.t;
 
 -- ===== Part 1: REVOKE DENY must match the level exactly =====
--- @as root
+-- @as dba
 -- @why The DENY is on the TABLE. Revoking at database level finds nothing to revoke (error 1141).
 -- @expect error 1141
 REVOKE DENY SELECT ON exp_lab.* FROM exp_r;
@@ -60,10 +60,10 @@ SHOW GRANTS FOR exp_r;
 
 -- ===== Part 5: DENYs outlive the database they point to =====
 -- @phase setup
--- @as root
+-- @as dba
 GRANT SELECT ON exp_lab.* TO exp_r;
 -- @phase demo
--- @as root
+-- @as dba
 DENY SELECT ON exp_lab.* TO exp_r;
 DROP DATABASE exp_lab;
 
@@ -72,7 +72,7 @@ DROP DATABASE exp_lab;
 SHOW GRANTS FOR exp_r;
 
 -- @phase setup
--- @as root
+-- @as dba
 CREATE DATABASE exp_lab;
 CREATE TABLE exp_lab.t (id INT PRIMARY KEY, pub VARCHAR(20));
 INSERT INTO exp_lab.t VALUES (1, 'x');
@@ -84,7 +84,7 @@ GRANT SELECT ON exp_lab.* TO exp_r;
 -- @expect error 1142 t
 SELECT * FROM exp_lab.t;
 
--- @as root
+-- @as dba
 REVOKE DENY SELECT ON exp_lab.* FROM exp_r;
 
 -- @as exp_u
@@ -95,7 +95,7 @@ SELECT * FROM exp_lab.t;
 -- @takeaway Audit for stale DENYs after dropping and re-creating databases: they are not cleaned up automatically.
 
 -- @phase cleanup
--- @as root
+-- @as dba
 DROP DATABASE exp_lab;
 DROP USER exp_u@'%';
 DROP ROLE exp_r;

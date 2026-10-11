@@ -33,7 +33,7 @@ SET ROLE NONE;
 SELECT * FROM exp_lab.t;
 
 -- ===== Option 2: DENY attached to the account =====
--- @as root
+-- @as dba
 DENY SELECT ON exp_lab.t TO exp_u@'%';
 
 -- @as exp_u
@@ -41,18 +41,18 @@ DENY SELECT ON exp_lab.t TO exp_u@'%';
 -- @expect error 1142 t
 SELECT * FROM exp_lab.t;
 
--- @as root
+-- @as dba
 REVOKE DENY SELECT ON exp_lab.t FROM exp_u@'%';
 
 -- ===== Option 3: DENY attached to PUBLIC =====
--- @as root
+-- @as dba
 DENY SELECT ON exp_lab.t TO PUBLIC;
 
 -- @as exp_u
 -- @expect error 1142 t
 SELECT * FROM exp_lab.t;
 
--- @as root
+-- @as dba
 REVOKE DENY SELECT ON exp_lab.t FROM PUBLIC;
 
 -- @as exp_u
@@ -64,7 +64,7 @@ SELECT * FROM exp_lab.t;
 -- @takeaway When privileges can also reach the user from elsewhere (direct grants, other roles, PUBLIC), attach the DENY to the account or to PUBLIC.
 
 -- @phase cleanup
--- @as root
+-- @as dba
 DROP DATABASE exp_lab;
 DROP USER exp_u@'%';
 DROP ROLE exp_r;

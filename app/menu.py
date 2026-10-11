@@ -6,13 +6,14 @@ as SQL; MariaDB decides whether it is allowed. This file contains NO
 permission checks - every menu option is shown to every role on purpose.
 
 Usage:
-    python app/menu.py
+    make set-password USER=smith_professor     (once per account you want to use)
+    python app/menu.py                         (asks for the password when you log in)
 """
 
 import pymysql
 
 from actions import READ_ACTIONS, update_grade
-from database import ACCOUNTS, ConfigError, connect_as, run_query
+from database import ACCOUNTS, ConfigError, connect_as, forget_password, run_query
 
 ROLES = list(ACCOUNTS)   # ["student", "professor", "finance", "admin"]
 
@@ -31,7 +32,7 @@ def print_rows(rows):
 def choose_role():
     print("\nWho do you want to log in as?")
     for number, role in enumerate(ROLES, start=1):
-        user, _ = ACCOUNTS[role]
+        user = ACCOUNTS[role]
         print(f"  {number}. {role:<10} (MariaDB user: {user})")
     while True:
         choice = input("Choose 1-4: ").strip()
@@ -58,9 +59,20 @@ def show_menu(role):
     print("  0. Quit")
 
 
+def login():
+    """Choose a role and log in, asking for the password (getpass) until it works."""
+    while True:
+        role = choose_role()
+        try:
+            return role, connect_as(role)
+        except pymysql.MySQLError as error:
+            forget_password(ACCOUNTS[role])
+            print(f"  Login failed ({error.args[0]}): {error.args[1]}")
+            print(f"  Set a password first with: make set-password USER={ACCOUNTS[role]}")
+
+
 def main():
-    role = choose_role()
-    connection = connect_as(role)
+    role, connection = login()
 
     while True:
         show_menu(role)
@@ -70,8 +82,7 @@ def main():
             break
         if choice == "7":
             connection.close()
-            role = choose_role()
-            connection = connect_as(role)
+            role, connection = login()
             continue
 
         try:

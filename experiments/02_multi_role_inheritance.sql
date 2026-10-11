@@ -46,7 +46,7 @@ SELECT * FROM exp_lab.t_data;
 SELECT * FROM exp_lab.t_audit;
 
 -- Now deny t_audit on a role three levels down.
--- @as root
+-- @as dba
 DENY SELECT ON exp_lab.t_audit TO exp_audit_block;
 
 -- @as exp_u
@@ -55,7 +55,7 @@ DENY SELECT ON exp_lab.t_audit TO exp_audit_block;
 SELECT * FROM exp_lab.t_audit;
 
 -- The documented remedy: make the server rebuild its privilege tables.
--- @as root
+-- @as dba
 FLUSH PRIVILEGES;
 
 -- @as exp_u
@@ -81,7 +81,7 @@ SELECT * FROM exp_lab.t_data;
 -- @takeaway MariaDB activates one role at a time (SET ROLE), so a DENY is only as strong as the role graph it belongs to. See experiment 8.
 
 -- @phase cleanup
--- @as root
+-- @as dba
 DROP DATABASE exp_lab;
 DROP USER exp_u@'%';
 DROP ROLE exp_team;

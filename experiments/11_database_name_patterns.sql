@@ -28,7 +28,7 @@ SELECT * FROM exp_lab_a.s;
 -- @expect rows 1
 SELECT * FROM exp1lab1a.s;
 
--- @as root
+-- @as dba
 -- @why Repair: escape the underscores with a backslash and grant again.
 REVOKE SELECT ON exp_lab_a.* FROM exp_u@'%';
 GRANT SELECT ON `exp\_lab\_a`.* TO exp_u@'%';
@@ -41,7 +41,7 @@ SELECT * FROM exp_lab_a.s;
 SELECT * FROM exp1lab1a.s;
 
 -- ===== A DENY written as a pattern =====
--- @as root
+-- @as dba
 GRANT SELECT ON `exp\_lab\_a`.* TO exp_v@'%';
 DENY SELECT ON `exp\_lab%`.* TO exp_v@'%';
 
@@ -50,7 +50,7 @@ DENY SELECT ON `exp\_lab%`.* TO exp_v@'%';
 -- @expect rows 1
 SELECT * FROM exp_lab_a.s;
 
--- @as root
+-- @as dba
 DENY SELECT ON `exp\_lab\_a`.* TO exp_v@'%';
 
 -- @as exp_v
@@ -62,7 +62,7 @@ SELECT * FROM exp_lab_a.s;
 -- @takeaway Never rely on a DENY pattern to override an exact-name grant; deny the exact database or table instead.
 
 -- @phase cleanup
--- @as root
+-- @as dba
 DROP DATABASE exp_lab_a;
 DROP DATABASE exp1lab1a;
 DROP USER exp_u@'%';

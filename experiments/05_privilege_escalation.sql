@@ -67,7 +67,7 @@ SELECT * FROM mysql.user;
 
 -- @why Attack 9: take over root by changing its password.
 -- @expect error 1044
-SET PASSWORD FOR root@'%' = PASSWORD('hacked');
+SET PASSWORD FOR root@localhost = PASSWORD('hacked');
 
 -- ===== Attacks on the server and the file system =====
 -- @expect error 1227
@@ -101,7 +101,7 @@ REVOKE DENY SELECT ON exp_lab.secret_t FROM exp_dba@'%';
 -- @takeaway A DENY also constrains delegated administrators: GRANT OPTION does not let them hand out, or unlock for themselves, a privilege they are denied.
 
 -- @phase cleanup
--- @as root
+-- @as dba
 DROP DATABASE exp_lab;
 DROP USER exp_low@'%';
 DROP USER exp_dba@'%';

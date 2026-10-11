@@ -8,7 +8,7 @@ A project for area 5, "Authentication and access control" for the [MariaDB stude
 
 ```bash
 git clone https://github.com/alexkhovrenkov/test_project_DB.git && cd test_project_DB
-make demo      # creates .env + certificates, starts MariaDB 13.1, runs every demonstration
+make demo      # creates certificates, starts MariaDB 13.1, runs every demonstration (no password to configure)
 make test      # 117 integration tests against the real server
 ```
 
@@ -42,7 +42,9 @@ This repository is a **hands-on, executable tutorial** for MariaDB's security fe
 fictional university database that holds things worth protecting (grades, bank details) and then:
 
 * controls who may do what with **roles**, **`GRANT`** and the new **`DENY`** statement (MariaDB 13.1),
-* logs users in with **ED25519 authentication**, so no password hash or password sits in a config file,
+* stores **no password in any file**: root authenticates with **`unix_socket`** (only via `docker exec`),
+  people log in with **ED25519** and type their password, automated runs use passwords that live only in
+  memory, and the run's administrator additionally needs a **client certificate** (`REQUIRE X509`),
 * forces every network connection through **TLS** and **verifies** the server certificate *and* host name,
 * **attacks** every one of those controls and shows which MariaDB mechanism stopped which attack,
 * **probes the edges**: eleven experiments on conflicting permissions, role inheritance, views, metadata
@@ -58,7 +60,7 @@ method instead of a password in a config file, verified TLS, then attack the set
 | Brief | Where it is done and shown |
 |---|---|
 | Roles and `DENY` doing the work | [sql/03_roles.sql](sql/03_roles.sql); sections 6-7; experiments 1, 2, 8 |
-| Authentication method instead of a stored password | ED25519, [sql/04_users.sh](sql/04_users.sh); section 8; [examples/05](examples/05_ed25519_authentication.sql) |
+| Authentication method instead of a stored password | `unix_socket` for root, ED25519 (+ X509 for the harness), no password on disk: [sql/04_users.sql](sql/04_users.sql), [sql/05_lockdown.sh](sql/05_lockdown.sh), [app/admin.py](app/admin.py); section 8 |
 | An attack against each control | section 12; [experiments/](experiments/); [tests/](tests/) |
 | TLS verified rather than assumed, and shown to be | section 9; [tests/test_tls.py](tests/test_tls.py) |
 | Reproducible from the README on a fresh server | `make demo`; section 3; verified from a clean copy (section 13) |
@@ -73,6 +75,7 @@ MariaDB-specific here:
 |---|---|
 | **`DENY` / `REVOKE DENY`** (negative grants) | New in **MariaDB 13.1** ([MDEV-14443](https://jira.mariadb.org/browse/MDEV-14443)). MySQL 8 and PostgreSQL have no equivalent: there, "everything except this table" means listing every allowed table and remembering every new one. Older MariaDB rejects the statement. |
 | **`ed25519` authentication plugin** (`IDENTIFIED VIA ed25519`) | Ships with MariaDB (`auth_ed25519`); the server stores only a *public key*. MySQL has no such plugin. |
+| **`unix_socket` authentication** | The operating-system user *is* the credential: `root@localhost` has no password at all and can only be used inside the container. Default plugin for root in MariaDB packages since 10.4. |
 | **MariaDB role model** (`CREATE ROLE`, `SET DEFAULT ROLE`, one active role at a time, roles inside roles) | Differs from MySQL 8 roles and from PostgreSQL's `INHERIT` roles; experiments 2 and 8 depend on these exact semantics. |
 | **Privileges as JSON in `mysql.global_priv`** | DENYs are stored in the `denies` key (section 7); `FLUSH PRIVILEGES` rebuilds the role graph (experiment 2). |
 | `ACCOUNT LOCK`, `PASSWORD EXPIRE`, `require_secure_transport`, `tls_version`, `PUBLIC` pseudo-role | Used in the authentication and TLS tests. |
@@ -84,19 +87,21 @@ complete, auditable sentence. No later, broader or narrower GRANT can lift the c
 `REVOKE DENY` can. That makes the rule "professors never read bank details" robust against future
 administrative mistakes (experiment 1) - with caveats we measured (section 11).
 
-**Why ED25519.** With `mysql_native_password` the server stores a SHA-1-derived hash that is
-*password-equivalent*: anyone who steals `mysql.user` can authenticate. With ED25519 the server stores only
-a public key; the client proves knowledge of the password by signing a random challenge and the password
-never crosses the network. Our test uses the stored value as a password and is rejected (section 8). It
-also works with a plain `pip install` of PyMySQL, unlike PARSEC (needs the C connector) or Unix-socket
-authentication (local only, which would make TLS pointless).
+**Why ED25519 and unix_socket, and no password file.** With `mysql_native_password` the server stores a
+SHA-1-derived hash that is *password-equivalent*: anyone who steals `mysql.user` can authenticate. With
+ED25519 the server stores only a public key; the client proves knowledge of the password by signing a random
+challenge, and the password never crosses the network. Our test uses the stored value as a password and is
+rejected (section 8). ED25519 works with a plain `pip install` of PyMySQL, unlike PARSEC (needs the C
+connector). For the one account that never needs the network - root - `unix_socket` is better still: there
+is no password to steal at all. Together they remove the classic weak point the area brief names, a
+password sitting in a configuration file: nothing in this repository or on disk holds one (section 8).
 
 **What verified TLS protects against.** *Encryption* stops eavesdropping. *Verification* (certificate chain
 + host name) stops an **impostor server**: without it, a perfectly encrypted connection can end at an
 attacker. PyMySQL 1.2's default (no TLS options) is encryption **without** verification; section 9 demonstrates the difference with a test.
 
-**How they interact.** TLS protects the *channel and the server's identity*, ED25519 proves the *client's
-identity* without exposing a reusable secret, roles+GRANT define *what that identity may do*, DENY caps it.
+**How they interact.** TLS protects the *channel and the server's identity*, ED25519 (plus a client
+certificate for the administrator) proves the *client's identity* without exposing a reusable secret, roles+GRANT define *what that identity may do*, DENY caps it.
 Each fails differently: a stolen password table (ED25519 helps), a sniffed network (TLS), a mistaken GRANT
 (DENY), a user switching roles (section 11, finding 2). No layer replaces another.
 
@@ -112,11 +117,12 @@ cd test_project_DB
 make demo
 ```
 
-`make demo` is safe to repeat. It will, in order: create `.env` with **random** passwords
-([scripts/init_env.sh](scripts/init_env.sh)), generate a CA and server certificate with owner-only key files
+`make demo` is safe to repeat and asks for nothing: there is no password to configure. It will, in order:
+generate a CA, a server certificate and a client certificate with owner-only key files
 ([scripts/generate_certs.sh](scripts/generate_certs.sh)), start MariaDB 13.1 with TLS required
-(`docker compose up -d --wait`; on the first start `sql/` creates schema, data, roles and users), create a
-Python virtual environment, and run (1) the role demo, (2) the 5 tutorial examples, (3) the 11 experiments (about 2,000 lines of output, saved from a real run in [docs/demo-output.txt](docs/demo-output.txt)).
+(`docker compose up -d --wait`; on the first start `sql/` creates schema, data, roles and *locked* users and
+switches root to `unix_socket`), create a Python virtual environment, create a short-lived administrator
+that gives the demo accounts random in-memory passwords ([app/admin.py](app/admin.py)), and run (1) the role demo, (2) the 5 tutorial examples, (3) the 11 experiments (about 2,000 lines of output, saved from a real run in [docs/demo-output.txt](docs/demo-output.txt)).
 Every step prints `PASS`/`FAIL`; any failure makes `make` exit non-zero.
 
 | Command | Does |
@@ -124,8 +130,11 @@ Every step prints `PASS`/`FAIL`; any failure makes `make` exit non-zero.
 | `make demo` | everything above |
 | `make test` | start the server if needed, run the 117-test pytest suite |
 | `make roles` / `make examples` / `make experiments` | one part of the demo |
-| `python app/menu.py` (after `make setup`) | interactive menu: log in as any role and try actions |
-| `make down` / `make reset` / `make clean` | stop / stop and delete data / also delete `.env`, certs, venv |
+| `make set-password USER=smith_professor` | choose a password for a demo account (typed, never stored) and unlock it |
+| `make sql USER=smith_professor` | `mariadb` client as that account (asks for the password) |
+| `make shell` | `mariadb` client as root, through the container socket - no password |
+| `python app/menu.py` (after `make set-password`) | interactive menu: log in as any role and try actions |
+| `make down` / `make reset` / `make clean` | stop / stop and delete data / also delete certs and venv |
 
 Check the server version:
 ```bash
@@ -248,12 +257,12 @@ and **each one reproduced on 13.1.2** by an experiment or test:
 | A DENY removes only the privilege it names | experiment 1 (E) |
 | Only `REVOKE DENY` at the **exact** level removes it (errors 1141 / 1147 otherwise) | experiment 4 |
 | Plain `REVOKE` removes grants, not denies | experiment 4 |
-| DENY works on roles, accounts and `PUBLIC` (even against root) | experiments 1, 7, 8 |
+| DENY works on roles, accounts and `PUBLIC` (even against the administrator) | experiments 1, 7, 8 |
 | A denied table disappears from `SHOW TABLES` / `information_schema` | [example 2](examples/02_deny.sql), experiment 10 |
 | DENY lines are shown in `SHOW GRANTS` only to accounts that can read `mysql.*` | experiment 10, `test_permissions.py` |
 | Stored in the `denies` key of `mysql.global_priv` | `test_deny_is_stored_in_global_priv_as_json` |
 
-Real `SHOW GRANTS` as root:
+Real `SHOW GRANTS` as an administrator (`make shell`):
 ```
 MariaDB> SHOW GRANTS FOR professor_role;
 GRANT USAGE ON *.* TO `professor_role`
@@ -262,9 +271,10 @@ GRANT UPDATE (`grade`) ON `university`.`grades` TO `professor_role`
 DENY SELECT ON `university`.`financial_records` TO `professor_role`
 ```
 
-Try it yourself (password: `PROFESSOR_PASSWORD` in `.env`):
+Try it yourself - choose a password for the professor, then log in with it:
 ```bash
-docker exec -it university-db mariadb -u smith_professor -p university
+make set-password USER=smith_professor   # asks for the new password twice
+make sql USER=smith_professor            # = docker exec -it university-db mariadb -u smith_professor -p university
 ```
 ```sql
 SELECT code, title FROM courses;       -- works
@@ -276,31 +286,74 @@ The official documentation, and the MariaDB article announcing the feature, also
 substitute for least-privilege design*: use it for clear exceptions, as here. Section 11 shows where the
 exception mechanism itself has sharp edges.
 
-## 8. Authentication: ED25519
+## 8. Authentication: no password in any file
 
-Authentication answers **"who are you?"**; roles and grants answer **"what may you do?"**.
+Authentication answers **"who are you?"**; roles and grants answer **"what may you do?"**. The area brief asks
+for "one of the authentication methods in place of a password in a configuration file". This project stores
+**no account password anywhere** - not in Git, not in `.env`, not in the container environment, not in the
+data directory - and every account still has a real authentication method:
 
-| Method (named in the brief) | Verdict for this project |
+| Account | Authentication | Where its secret lives |
+|---|---|---|
+| `root@localhost` (no `root@'%'` exists) | **`unix_socket`**: the OS user `root` inside the container | nowhere - there is no password. Use `make shell` / `docker exec … mariadb`. |
+| `alice_student`, `smith_professor`, `jones_finance`, `uni_admin` | **ED25519** | created `ACCOUNT LOCK` with an unusable key; a person sets a password with `make set-password` (getpass) and types it at login, or an automated run sets a random one that exists only in that process's memory |
+| `harness_<hex>` - the administrator of one test/demo run | **ED25519 + `REQUIRE X509`** | random password in process memory only, plus `certs/client-key.pem` (issued by the project CA); dropped at the end of the run |
+| `my_grades_owner@localhost` (view definer) | none - `ACCOUNT LOCK`, cannot log in | - |
+
+| Method named in the brief | Used for |
 |---|---|
-| **Unix socket** | No password at all, but local-machine only. Our client connects over the network into Docker, and TLS would be pointless over a local socket. |
-| **PARSEC** | Newest method (MariaDB 11.6+), but the pure-Python PyMySQL cannot speak it; it needs a locally compiled C connector, fragile on student laptops. |
-| **ED25519** ✅ | Ships with MariaDB, works with `pip install pymysql[ed25519]`, works over TLS. |
+| **Unix socket** ✅ | root. No password at all; only usable inside the container. Not suitable for the application, which connects over the network (TLS would be pointless over a local socket). |
+| **ED25519** ✅ | every network account. Ships with MariaDB, works with `pip install pymysql[ed25519]`, works over TLS. |
+| **PARSEC** | not used: the pure-Python PyMySQL cannot speak it (it needs a locally compiled C connector). |
 
-**Setup** ([sql/04_users.sh](sql/04_users.sh)): `INSTALL SONAME 'auth_ed25519'; CREATE USER ... IDENTIFIED VIA ed25519 USING PASSWORD('...')`.
-MariaDB derives a key pair from the password and stores **only the public key** in `mysql.user`. `root` is
-switched to ed25519 too, so every password account uses the same method. Passwords come from the local
-`.env` (random, generated by `make env`), never from Git.
+**How it is built** ([sql/04_users.sql](sql/04_users.sql), [sql/05_lockdown.sh](sql/05_lockdown.sh),
+[app/admin.py](app/admin.py)):
 
-**Login:** the client says who it is; the server sends a random challenge; the client recomputes the private
-key from the typed password and *signs* the challenge; the server verifies with the stored public key. A
-failure returns `ERROR 1045 Access denied` before any query can run - the same error for a wrong password
-and for a non-existent user, so accounts cannot be enumerated.
+1. The container starts with `MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=1` and `MARIADB_ROOT_HOST=localhost`: the
+   image creates only `root@localhost`, reachable only through the socket of the temporary init server
+   (`--skip-networking`). We chose this over `MARIADB_RANDOM_ROOT_PASSWORD`, which would print a password into
+   the container log.
+2. `04_users.sql` creates the demo accounts with `IDENTIFIED VIA ed25519 USING '<public key>' ACCOUNT LOCK`.
+   The public key belongs to 32 random bytes that were discarded after computing it, so no password matches.
+3. The last init script switches root to `IDENTIFIED VIA unix_socket` and removes the image's `healthcheck`
+   accounts together with the file holding their password (`/var/lib/mysql/.my-healthcheck.cnf`);
+   `healthcheck.sh` then connects as the OS user root through the socket. We checked the container still
+   becomes healthy, also after a restart that keeps the data.
+4. Each automated run creates `harness_<hex>` through `docker exec` (socket root) with a random password and
+   `REQUIRE X509`, grants it only data, account and grant privileges (no `FILE`, `SUPER`, `SHUTDOWN`,
+   `PROCESS`, replication or connection admin), sets random passwords for the demo accounts and unlocks them,
+   and drops itself at the end.
 
-Attacks and results ([tests/test_authentication.py](tests/test_authentication.py), [example 5](examples/05_ed25519_authentication.sql)):
+*How passwords reach SQL.* MariaDB accepts only a string **literal** inside `PASSWORD(...)`: we checked that a
+server-side placeholder (`PASSWORD(?)`) and a variable (`PASSWORD(@pw)`) are both syntax errors (1064). So a
+password always travels as an escaped literal. Over a driver connection that is PyMySQL's `%s` parameter;
+through `docker exec` (where there is no driver connection) `app/admin.py` uses the same escaping function as
+the driver, `pymysql.converters.escape_item`, and sends the SQL on stdin, never on a command line.
+
+Real output (`make set-password`, then logging in through the container socket):
+```
+$ make set-password USER=smith_professor
+New password for smith_professor:
+Repeat it:
+Password set and account unlocked. Log in with: make sql USER=smith_professor
+
+$ docker exec -i university-db mariadb -u smith_professor -p… university -e "SELECT CURRENT_USER(); SELECT * FROM financial_records;"
+CURRENT_USER()
+smith_professor@%
+ERROR 1142 (42000) at line 1: SELECT command denied to user 'smith_professor'@'localhost' for table `university`.`financial_records`
+```
+
+**ED25519 login:** the client says who it is; the server sends a random challenge; the client recomputes the
+private key from the typed password and *signs* the challenge; the server verifies with the stored public key.
+A failure returns `ERROR 1045 Access denied` before any query can run - the same error for a wrong password and
+for a non-existent user, so accounts cannot be enumerated.
+
+Attacks and results ([tests/test_authentication.py](tests/test_authentication.py),
+[tests/test_account_model.py](tests/test_account_model.py), [example 5](examples/05_ed25519_authentication.sql)):
 
 | Attack / check | Expected | Actual |
 |---|---|---|
-| All 4 demo accounts and both `root` accounts use `ed25519` | yes | ✅ |
+| All 4 demo accounts use `ed25519` | yes | ✅ |
 | Correct password | login, correct user and role | ✅ |
 | Wrong password, empty password, another user's password | error **1045** | ✅ |
 | Unknown user vs wrong password | identical error (no enumeration) | ✅ |
@@ -308,6 +361,12 @@ Attacks and results ([tests/test_authentication.py](tests/test_authentication.py
 | Password appears in `mysql.user` / `mysql.global_priv` | never | ✅ |
 | Locked account (`ACCOUNT LOCK`) with the correct password | error **4151** | ✅ |
 | Expired password | login ok, every statement fails with **1820** | ✅ |
+| root over the network (TLS), with an empty, guessed or any password | error **1045** - `root@'%'` does not exist | ✅ |
+| root through `docker exec` | `root@localhost`, plugin `unix_socket`, no password | ✅ |
+| Harness account with the right password but **without** its client certificate | error **1045** | ✅ |
+| Any live password (harness + 4 demo accounts) in any file of the project directory, `.env` included | none | ✅ |
+| Password variables in the container environment / healthcheck password file in the data directory | only `MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=1` / file absent | ✅ |
+| Harness password in the server log | absent | ✅ |
 
 ## 9. TLS that is verified, not assumed
 
@@ -328,7 +387,7 @@ Client side ([app/database.py](app/database.py)): `ssl_ca=certs/ca.pem`, `ssl_ve
 | Correct CA, full verification | - | ✅ connected, `TLSv1.3`, `TLS_AES_256_GCM_SHA384` |
 | Client trusts a different CA | client | ❌ `[SSL: CERTIFICATE_VERIFY_FAILED] ... self-signed certificate in certificate chain` |
 | Connect to `127.0.0.1` (certificate says `localhost`) | client | ❌ `CERTIFICATE_VERIFY_FAILED ... IP address mismatch` |
-| No TLS at all (user *and* root) | **server** | ❌ `3159 Connections using insecure transport are prohibited while --require_secure_transport=ON` |
+| No TLS at all (demo user *and* the administrator) | **server** | ❌ `3159 Connections using insecure transport are prohibited while --require_secure_transport=ON` |
 | Server offers only TLS 1.2/1.3; refuses plaintext | server config | ✅ `tls_version=TLSv1.2,TLSv1.3`, `require_secure_transport=ON` |
 | Encryption with verification turned **off** (explicitly, or PyMySQL's default) | - | ⚠️ connects. This is "assumed, not verified" - the lesson |
 
@@ -370,7 +429,7 @@ Step 3  user: exp_viewer  (active role: none)
 | 4 | [revoke_deny](experiments/04_revoke_deny.sql) | What really removes a DENY? | Exact level only; plain REVOKE does not; `REVOKE ALL` does; DENY outlives `DROP DATABASE` (finding 7) |
 | 5 | [privilege_escalation](experiments/05_privilege_escalation.sql) | 15 escalation attempts incl. a delegated admin with GRANT OPTION | All refused with specific codes (1959, 1142, 1227, 1044) |
 | 6 | [unauthorized_access](experiments/06_unauthorized_access.sql) | Joins, subqueries, other schemas, view widening - on the real DB | Every route to forbidden data blocked |
-| 7 | [misconfiguration_recovery](experiments/07_misconfiguration_recovery.sql) | Missing default role, over-broad GRANT, `DENY ... TO PUBLIC` | Symptoms, diagnosis and repair of each; PUBLIC DENY locks out root until revoked |
+| 7 | [misconfiguration_recovery](experiments/07_misconfiguration_recovery.sql) | Missing default role, over-broad GRANT, `DENY ... TO PUBLIC` | Symptoms, diagnosis and repair of each; PUBLIC DENY locks out the administrator until revoked |
 | 8 | [deny_scope_role_vs_user](experiments/08_deny_scope_role_vs_user.sql) | Can a user shed a role-attached DENY? | **Yes, with `SET ROLE NONE`**; account-level and PUBLIC denies cannot be shed (finding 2) |
 | 9 | [views_and_deny](experiments/09_views_and_deny.sql) | DENY vs `SQL SECURITY DEFINER` / `INVOKER` views | DENY on the viewer does not follow a definer view (finding 3) |
 | 10 | [metadata_visibility](experiments/10_metadata_visibility.sql) | What can a denied user still learn? | Listings hidden; error codes leak existence (finding 5) |
@@ -443,7 +502,7 @@ privilege silently returns `NULL` instead of an error.
 | Eavesdropping on the connection | TLS | `test_verified_connection_uses_modern_tls` | - |
 | Impostor server with its own certificate | CA verification | `test_client_trusting_a_different_ca...` | client: `CERTIFICATE_VERIFY_FAILED` |
 | Traffic redirected to the wrong host name | host-name verification | `test_host_name_mismatch_is_refused` | client: `IP address mismatch` |
-| Client talking without TLS (also root) | `require_secure_transport` | `test_plaintext_connection_...` | 3159 |
+| Client talking without TLS (also the administrator) | `require_secure_transport` | `test_plaintext_connection_...` | 3159 |
 | Student reads grades / finance data | role has no GRANT | `test_role_matrix` | 1142 |
 | Student widens the `my_grades` view | filter is inside the view | `test_student_cannot_widen_the_view` | still 2 rows |
 | Professor reads bank details (also via JOIN) | **DENY** | `test_professor_join_cannot_reach_the_denied_table` | 1142 |
@@ -470,7 +529,7 @@ All numbers are from actual runs on 2026-10-11 against `13.1.2-MariaDB-ubu2604` 
 | `make demo` a second time on the same server | exit 0, identical totals (idempotent) |
 | `make test` (pytest, real server, same clean copy) | **117 passed** in ~1 s ([docs/test-output.txt](docs/test-output.txt)) |
 | pinned image as **x86_64** (emulated on Apple silicon): `make test` and `make demo` | 117 passed; role demo 24/24; examples 108/108; experiments 325/325 |
-| `shellcheck` on `scripts/*.sh`, `sql/04_users.sh` (official Docker image) | no findings |
+| `shellcheck` on `scripts/*.sh`, `sql/*.sh` (official Docker image) | no findings |
 
 Test files ([tests/](tests/)), all connecting to the real server:
 
@@ -479,9 +538,9 @@ Test files ([tests/](tests/)), all connecting to the real server:
 | [test_permissions.py](tests/test_permissions.py) | the 4×6 role matrix with exact error codes, view isolation, column privilege, DENY beats later GRANT, SHOW GRANTS/SHOW TABLES visibility, JSON storage, injection payloads |
 | [test_deny_semantics.py](tests/test_deny_semantics.py) | GRANT/DENY conflicts (levels, order), nested roles, column-level DENY, `REVOKE DENY` (exact level, plain REVOKE, REVOKE ALL), SET ROLE NONE, definer views, wildcard names, stale denies, PUBLIC lockout and recovery |
 | [test_authentication.py](tests/test_authentication.py) | ED25519 for all accounts, wrong/empty/foreign passwords, no enumeration, stolen public key, no clear-text password, lock and expiry |
-| [test_tls.py](tests/test_tls.py) | verified connection and protocol version, wrong CA, host-name mismatch, plaintext refused (user and root), verification-off lesson, PyMySQL's unverified default |
+| [test_tls.py](tests/test_tls.py) | verified connection and protocol version, wrong CA, host-name mismatch, plaintext refused (demo user and administrator), verification-off lesson, PyMySQL's unverified default |
 | [test_experiments.py](tests/test_experiments.py) | runs all 16 `.sql` tutorial files; any mismatching step fails with the step-by-step output |
-| [test_repository_security.py](tests/test_repository_security.py) | key files owner-only, no secrets/keys tracked, `.env` ignored and not a placeholder, no string-built SQL in `app/`, TLS verification on, port on loopback |
+| [test_repository_security.py](tests/test_repository_security.py) | key files owner-only, no secrets/keys tracked, `.env` and keys ignored, no interpolated password in SQL/shell, no string-built SQL in `app/`, TLS verification on, port on loopback |
 
 Tests use random throw-away names (`t_lab_<hex>`) and clean up; after a run the server is as `sql/` left it.
 
@@ -511,18 +570,21 @@ locally including on x86_64), but it has not yet been executed on GitHub - that 
 | TLS attacks (section 9) | `.venv/bin/python -m pytest tests/test_tls.py -v` | all PASSED |
 | DENY semantics (section 7) | `.venv/bin/python -m pytest tests/test_deny_semantics.py -v` | all PASSED |
 | Everything, verbosely | `.venv/bin/python -m pytest -v` | 117 passed |
-| By hand, as a role | `docker exec -it university-db mariadb -u smith_professor -p university` | section 7 |
-| Interactively | `.venv/bin/python app/menu.py` | pick a role, try all actions |
+| Password-free account model (section 8) | `.venv/bin/python -m pytest tests/test_account_model.py -v` | all PASSED |
+| By hand, as a role | `make set-password USER=smith_professor`, then `make sql USER=smith_professor` | section 7 |
+| Interactively | `make set-password USER=…`, then `.venv/bin/python app/menu.py` | pick a role, type its password, try all actions |
 
 ## 15. Security hardening and what is still unprotected
 
 **Done in this repository** (and checked by tests where marked 🧪):
 
 * 🧪 TLS private keys are mode `600` on the host and inside the container (earlier versions used `644`).
-* 🧪 No credentials in Git: `.env` and `certs/` are ignored; passwords are random (`make env`); the
-  `change-me-*` placeholders from `.env.example` are rejected by `init_env.sh` and `04_users.sh`.
-* Passwords are validated (`[A-Za-z0-9_-]`, ≥ 12 characters) before they are placed inside SQL quotes in
-  `04_users.sh`, and are passed to the client via `MYSQL_PWD`, not on the command line.
+* 🧪 No account password in any file (section 8): root is `unix_socket`-only, the demo accounts start locked,
+  automated runs keep their passwords in memory, people type theirs; `.env` holds only non-secret settings.
+* 🧪 No `root@'%'`: root cannot be reached over the network at all.
+* 🧪 The administrator of a run is a short-lived, least-privilege account that also needs a client
+  certificate (`REQUIRE X509`).
+* 🧪 No password is interpolated into SQL text: driver parameters, or the driver's escaping function on stdin.
 * 🧪 SQL injection: the app passes values only as parameters (and validates numbers); a test fails if `app/`
   builds SQL by string formatting. Test fixtures build only identifiers they generated themselves.
 * 🧪 Verified TLS everywhere (`ssl_verify_cert`, `ssl_verify_identity`); `tls_version` limited to 1.2/1.3;
@@ -534,16 +596,21 @@ locally including on x86_64), but it has not yet been executed on GitHub - that 
 
 **Still unprotected / limitations** - honest list:
 
-* The test harness and experiments log in as **`root` over the network (TLS)**, because they create accounts
-  and issue GRANT/DENY. In production use a dedicated administrative account, not root.
-* The passwords are handed to the container as environment variables (`docker inspect` shows them), and
-  `.env` holds them in plain text on your computer. Fine for a local demo; production would use Docker
-  secrets or a vault.
+* **Anyone who can run `docker exec` on this machine is root in the database** (that is what `unix_socket`
+  means here). Access to the Docker daemon must be protected like the root password it replaces.
+* The harness's client key (`certs/client-key.pem`) is a long-lived file credential. It is not sufficient on its
+  own (the account also needs its in-memory password and exists only during a run), but it is a secret on
+  disk, protected only by file permissions (`600`).
+* During the few seconds of first initialisation root has an empty password, reachable only through the socket
+  of the temporary server (no networking). If initialisation failed before `05_lockdown.sh`, the container
+  would be left in that state; `make reset` starts over.
+* A password typed into `make set-password` / `make sql` is visible to that terminal session's process memory,
+  as with any client.
 * The CA key lives on the same machine as the server, certificates are valid for 365 days and there is no
-  revocation or client-certificate authentication (`REQUIRE X509` is a possible extension).
+  revocation.
 * TLS protects data in transit only; it does not help against the server host, Docker daemon, a compromised
   client, or database files at rest (no encryption at rest here).
-* Roles and DENY do not restrict root; anyone with the root password can `REVOKE DENY`.
+* Roles and DENY do not restrict root; anyone who can become root (here: `docker exec`) can `REVOKE DENY`.
 * Permissions cannot tell legitimate access from misuse: finance can copy every IBAN it may read.
 * ED25519 does not stop weak passwords (no password-validation plugin is enabled).
 * `MariaDB 13.1` is a **preview** release; the findings in section 11 (especially finding 1) may change.
@@ -559,34 +626,35 @@ locally including on x86_64), but it has not yet been executed on GitHub - that 
 | `make: docker: command not found` / daemon not running | Start Docker Desktop; verify with `docker info`. |
 | `The container name "/university-db" is already in use` | Another copy of this project is running: `docker compose down` there (or `docker rm -f university-db`). |
 | `port is already allocated` | Another MariaDB/MySQL uses 3306. Set `MARIADB_PORT=3307` in `.env`. |
-| `ERROR 1045` for everyone after editing `.env` | Passwords are applied only when the data volume is first created: `make reset && make demo`. |
-| `.env still contains the 'change-me' placeholders` | `rm .env && make env` (or `make clean`). |
+| `ERROR 1045` / `4151 account is locked` when you log in by hand | The demo accounts start locked and every `make demo`/`make test` gives them new random passwords: run `make set-password USER=…` again. |
 | Container exits at start, log mentions `server-key.pem` | Certificates are missing/unreadable: `make reset`, `rm -rf certs`, `make up`. |
+| `no password known for …` | Automated tools set passwords themselves; for interactive tools run `make set-password USER=…` first and use a terminal (the password is asked for with getpass). |
 | `CERTIFICATE_VERIFY_FAILED` when you connect with your own client | Pass `--ssl-ca=certs/ca.pem --ssl-verify-server-cert` and connect to `localhost` (the certificate name). |
 | `ModuleNotFoundError: nacl` / auth plugin error | Use the project venv: `make venv`; ED25519 needs `pymysql[ed25519]`. |
 | A test says `DENY on an inherited role is now enforced immediately` | The server's behaviour changed (finding 1): update section 11 and experiment 2. |
 | An experiment was interrupted and left objects | Re-run it; every file starts by dropping its own leftovers. `make reset` always restores a pristine server. |
-| `04_users.sh: Permission denied` in `docker logs university-db` | `chmod +x sql/04_users.sh`, then `make reset && make demo`. |
+| `05_lockdown.sh: Permission denied` in `docker logs university-db` | `chmod +x sql/05_lockdown.sh`, then `make reset && make demo`. |
 
 ## 17. Repository layout
 
 ```
 ├── README.md                    this document
-├── Makefile                     make demo | test | roles | examples | experiments | down | reset | clean
+├── Makefile                     make demo | test | roles | examples | experiments | set-password | sql | shell | down | reset | clean
 ├── docker-compose.yml           MariaDB 13.1 with TLS; key copied in with owner-only permissions
-├── .env.example                 documents the variables (make env creates the real, random .env)
+├── .env.example                 optional non-secret settings (port, container name, image) - no passwords
 ├── requirements.txt             pymysql[ed25519], python-dotenv        requirements-dev.txt  + pytest
 ├── .github/workflows/ci.yml     CI: shellcheck, MariaDB 13.1 container, pytest, demo
 ├── sql/                         run by the image on first start, in this order:
 │   ├── 01_schema.sql            tables
 │   ├── 02_data.sql              fake data
 │   ├── 03_roles.sql             roles, GRANT, DENY, the my_grades view and its definer
-│   └── 04_users.sh              ED25519 users (shell, so passwords come from .env)
+│   ├── 04_users.sql             ED25519 users, created LOCKED with an unusable key (no password)
+│   └── 05_lockdown.sh           root -> unix_socket; removes the image's healthcheck password file
 ├── scripts/
-│   ├── init_env.sh              random passwords -> .env
-│   └── generate_certs.sh        CA + server certificate, keys mode 600
+│   └── generate_certs.sh        CA, server and client certificates, keys mode 600
 ├── app/
-│   ├── database.py              verified-TLS connections. No security logic.
+│   ├── database.py              verified-TLS connections; passwords from memory or getpass. No security logic.
+│   ├── admin.py                 socket-root helper, the short-lived harness account, set-password
 │   ├── actions.py               the university SQL (fixed strings) + validated update_grade
 │   ├── demo.py                  six actions x four roles, expected/actual/PASS-FAIL
 │   ├── menu.py                  interactive version

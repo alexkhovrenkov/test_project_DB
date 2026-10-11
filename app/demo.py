@@ -13,7 +13,9 @@ Usage:
     python app/demo.py admin
     python app/demo.py            (runs all four, one after another)
 
-Exit code 0 means every action behaved as expected.
+Exit code 0 means every action behaved as expected. The demo accounts get fresh
+random passwords for the run (kept in memory only): after the demo, use
+"make set-password USER=..." to log in by hand.
 """
 
 import sys
@@ -21,6 +23,7 @@ import sys
 import pymysql
 
 from actions import READ_ACTIONS, UPDATE_GRADE_SQL, update_grade
+from admin import Harness, SocketSQLError
 from database import ACCOUNTS, ConfigError, connect_as, run_query
 
 ALLOW = "allowed"
@@ -93,7 +96,7 @@ def show_session(connection):
 
 def run_demo(role):
     """Run the six actions as one role. Returns the number of FAILed actions."""
-    account, _ = ACCOUNTS[role]
+    account = ACCOUNTS[role]
     print()
     print("=" * 78)
     print(f" ROLE: {role}   (MariaDB account: {account})")
@@ -142,8 +145,12 @@ def main():
         return 2
 
     try:
-        failures = sum(run_demo(role) for role in roles)
-    except ConfigError as error:
+        # A short-lived admin account gives the demo users fresh random passwords
+        # that exist only in this process (see app/admin.py).
+        with Harness() as harness:
+            harness.activate_demo_accounts()
+            failures = sum(run_demo(role) for role in roles)
+    except (ConfigError, SocketSQLError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
     except pymysql.MySQLError as error:

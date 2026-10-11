@@ -26,7 +26,7 @@ GRANT tut_reader TO tut_ann@'%';
 SET DEFAULT ROLE tut_reader FOR tut_ann@'%';
 
 -- @phase demo
--- @as root
+-- @as dba
 -- @why SHOW GRANTS FOR a role lists exactly what the role can do.
 -- @expect contains SELECT
 SHOW GRANTS FOR tut_reader;
@@ -45,7 +45,7 @@ SELECT * FROM tutorial.employees;
 INSERT INTO tutorial.projects VALUES (3, 'Mercury');
 
 -- Now the administrator extends the ROLE once; every user holding it benefits.
--- @as root
+-- @as dba
 GRANT INSERT ON tutorial.projects TO tut_reader;
 
 -- @as tut_ann
@@ -53,7 +53,7 @@ GRANT INSERT ON tutorial.projects TO tut_reader;
 INSERT INTO tutorial.projects VALUES (3, 'Mercury');
 
 -- @phase cleanup
--- @as root
+-- @as dba
 DROP DATABASE tutorial;
 DROP USER tut_ann@'%';
 DROP ROLE tut_reader;

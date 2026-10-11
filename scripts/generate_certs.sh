@@ -8,6 +8,10 @@
 #   ca.pem / ca-key.pem                   Our own tiny "University CA". The client trusts ca.pem.
 #   server-cert.pem / server-key.pem      The MariaDB server's certificate, SIGNED by our CA,
 #                                         valid for the host name "localhost".
+#   client-cert.pem / client-key.pem      A CLIENT certificate (CN=university-harness), signed by our CA.
+#                                         The short-lived administrative account of the tests and
+#                                         demos is created with REQUIRE X509: without this
+#                                         certificate and its key it cannot log in, password or not.
 #   untrusted-ca.pem / untrusted-ca-key.pem
 #                                         A second, unrelated CA. Used only by the tests to show
 #                                         that a client trusting the WRONG CA refuses to connect.
@@ -52,13 +56,23 @@ quietly openssl x509 -req -in server-req.pem -days 365 \
     -out server-cert.pem \
     -extfile <(printf "subjectAltName=DNS:localhost")
 
-# 4. A different CA that has nothing to do with our server (for the TLS attack test).
+# 4. A client certificate for the harness account (see app/admin.py).
+#    extendedKeyUsage=clientAuth: it can only be used to authenticate a client.
+quietly openssl req -newkey rsa:2048 -nodes \
+    -keyout client-key.pem -out client-req.pem \
+    -subj "/CN=university-harness"
+quietly openssl x509 -req -in client-req.pem -days 365 \
+    -CA ca.pem -CAkey ca-key.pem -CAcreateserial \
+    -out client-cert.pem \
+    -extfile <(printf "extendedKeyUsage=clientAuth")
+
+# 5. A different CA that has nothing to do with our server (for the TLS attack test).
 quietly openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
     -keyout untrusted-ca-key.pem -out untrusted-ca.pem \
     -subj "/CN=Some Other CA"
 
 # Clean up helper files we no longer need.
-rm -f server-req.pem ca.srl
+rm -f server-req.pem client-req.pem ca.srl
 
 # Private keys must be readable by their owner only. (docker-compose.yml copies
 # the server key into the container with the right owner, so no loosening of
@@ -73,4 +87,4 @@ fi
 # Show what we made: who the certificate belongs to and who signed it.
 echo
 openssl x509 -in server-cert.pem -noout -subject -issuer -ext subjectAltName
-openssl verify -CAfile ca.pem server-cert.pem
+openssl verify -CAfile ca.pem server-cert.pem client-cert.pem
