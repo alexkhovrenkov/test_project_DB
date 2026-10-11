@@ -28,7 +28,7 @@ hand, open one session per identity and paste the statements for that identity:
 make shell
 # as a user the lesson creates, e.g. tut_ann: replace '{{pw}}' in its CREATE USER by a password of your
 # choice (12+ characters with upper and lower case, a digit and a symbol), then
-docker exec -it university-db mariadb -u tut_ann -p
+docker compose exec mariadb mariadb -u tut_ann -p
 ```
 
 The lessons only touch a scratch database called `tutorial` and accounts starting with `tut_`; each

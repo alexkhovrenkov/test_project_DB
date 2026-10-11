@@ -139,9 +139,9 @@ Every step prints `PASS`/`FAIL`; any failure makes `make` exit non-zero.
 | `python app/menu.py` (after `make set-password`) | interactive menu: log in as any role and try actions |
 | `make down` / `make reset` / `make clean` | stop / stop and delete data / also delete certs and venv |
 
-Check the server version:
+Check the server version (`docker compose exec mariadb ...` works whatever the container is called):
 ```bash
-docker exec university-db mariadbd --version
+docker compose exec mariadb mariadbd --version
 # mariadbd  Ver 13.1.2-MariaDB-ubu2604 for debian-linux-gnu on aarch64 (mariadb.org binary distribution)
 ```
 
@@ -278,7 +278,7 @@ DENY SELECT ON `university`.`financial_records` TO `professor_role`
 Try it yourself - choose a password for the professor, then log in with it:
 ```bash
 make set-password USER=smith_professor   # asks for the new password twice
-make sql USER=smith_professor            # = docker exec -it university-db mariadb -u smith_professor -p university
+make sql USER=smith_professor            # = docker exec -it $MARIADB_CONTAINER mariadb -u smith_professor -p university
 ```
 ```sql
 SELECT code, title FROM courses;       -- works
@@ -342,9 +342,13 @@ New password for smith_professor:
 Repeat it:
 Password set and account unlocked. Log in with: make sql USER=smith_professor
 
-$ docker exec -i university-db mariadb -u smith_professor -p… university -e "SELECT CURRENT_USER(); SELECT * FROM financial_records;"
+$ docker compose exec mariadb mariadb -u smith_professor -p… university -e "SELECT CURRENT_USER(); SELECT * FROM financial_records;"
 CURRENT_USER()
 smith_professor@%
+--------------
+SELECT * FROM financial_records
+--------------
+
 ERROR 1142 (42000) at line 1: SELECT command denied to user 'smith_professor'@'localhost' for table `university`.`financial_records`
 ```
 
@@ -437,7 +441,7 @@ Client side ([app/database.py](app/database.py)): `ssl_ca=certs/ca.pem`, `ssl_ve
 (`umask 077`, checked after creation). The MariaDB process runs as the unprivileged `mysql` user, so the
 container's entrypoint wrapper copies the key into the container with owner `mysql`, mode `600`:
 ```
-$ docker exec university-db ls -l /etc/mysql/tls
+$ docker compose exec mariadb ls -l /etc/mysql/tls
 -rw-r--r-- 1 mysql mysql 1139 ca.pem
 -rw-r--r-- 1 mysql mysql 1131 server-cert.pem
 -rw------- 1 mysql mysql 1704 server-key.pem
@@ -738,15 +742,14 @@ locally including on x86_64), but it has not yet been executed on GitHub - that 
   credentials that existed before the plugins were installed (finding 11).
 * `MariaDB 13.1` is a **preview** release; the findings in section 11 (especially finding 1) may change in newer
   builds. The project pins the verified build by digest; the floating tag is only used when you choose it.
-* `make` is required (use WSL on Windows). The `university-db` container name is fixed, so two copies of the
-  project cannot run at the same time.
+* `make` is required for the one-command workflow (on Windows use WSL, or the plain commands in section 3).
 
 ## 16. Troubleshooting
 
 | Problem | Fix |
 |---|---|
 | `make: docker: command not found` / daemon not running | Start Docker Desktop; verify with `docker info`. |
-| `The container name "/university-db" is already in use` | Another copy of this project is running: `docker compose down` there (or `docker rm -f university-db`). |
+| `The container name "/university-db" is already in use` | Another copy of this project is running. Stop it (`make down` there), or give this copy its own name and port in `.env`: `MARIADB_CONTAINER=university-db-2` and `MARIADB_PORT=3307` (we ran two copies side by side this way; both passed `make test`). |
 | `port is already allocated` | Another MariaDB/MySQL uses 3306. Set `MARIADB_PORT=3307` in `.env`. |
 | `ERROR 1045` / `4151 account is locked` when you log in by hand | The demo accounts start locked and every `make demo`/`make test` gives them new random passwords: run `make set-password USER=…` again. |
 | Container exits at start, log mentions `server-key.pem` | Certificates are missing/unreadable: `make reset`, `rm -rf certs`, `make up`. |
@@ -755,7 +758,7 @@ locally including on x86_64), but it has not yet been executed on GitHub - that 
 | `ModuleNotFoundError: nacl` / auth plugin error | Use the project venv: `make venv`; ED25519 needs `pymysql[ed25519]`. |
 | A test says `DENY on an inherited role is now enforced immediately` | The server's behaviour changed (finding 1): update section 11 and experiment 2. |
 | An experiment was interrupted and left objects | Re-run it; every file starts by dropping its own leftovers. `make reset` always restores a pristine server. |
-| `06_lockdown.sh: Permission denied` in `docker logs university-db` | `chmod +x sql/06_lockdown.sh`, then `make reset && make demo`. |
+| `06_lockdown.sh: Permission denied` in `docker compose logs mariadb` | `chmod +x sql/06_lockdown.sh`, then `make reset && make demo`. |
 
 ## 17. Repository layout
 
