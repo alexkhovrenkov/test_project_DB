@@ -13,3 +13,6 @@ __pycache__/
 
 # Local output captured by "make demo | tee"
 /demo-output.txt
+
+# Internal notes for the team (not published)
+/docs/TEAM_GUIDE.md
