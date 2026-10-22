@@ -14,8 +14,11 @@ To try the newest 13.1 preview build instead, put `MARIADB_IMAGE=quay.io/mariadb
 ```bash
 git clone https://github.com/alexkhovrenkov/test_project_DB.git && cd test_project_DB
 make demo      # creates certificates, starts MariaDB 13.1, runs every demonstration (no password to configure)
-make test      # 260 tests: 100 unit + 160 integration tests against the real server
+make test      # 353 tests: 157 unit + 196 integration tests against the real server
+make lab       # MariaDB Interactive Lab in the browser: SQL playground as each role, live analytics, docs
 ```
+
+[![MariaDB Interactive Lab: the SQL Playground running a query as the professor; MariaDB refuses it with error 1142 because of the DENY](docs/screenshots/playground.png)](#the-mariadb-interactive-lab-web-frontend)
 
 ## Contents
 
@@ -55,6 +58,8 @@ fictional university database that holds things worth protecting (grades, bank d
 * **probes the edges**: fourteen experiments on conflicting permissions, role inheritance, views, metadata
   leaks, pattern names, routines, password policy and administrative mistakes - some of which found behaviour that is not obvious
   from the documentation (section 11).
+* puts all of it in a browser: the **MariaDB Interactive Lab** (`make lab`, section 3) runs any of 21 prepared
+  statements - or your own - *as* each of the four accounts and shows MariaDB's answer, and measures the setup live.
 
 The Python code is deliberately small: it sends SQL to MariaDB and prints MariaDB's answer. **All security
 decisions are made by MariaDB.** There is no `if user == "professor"` anywhere in this repository.
@@ -113,7 +118,7 @@ Each fails differently: a stolen password table (ED25519 helps), a sniffed netwo
 ## 3. Requirements and quick start
 
 **You need:** Docker with the Compose plugin (Docker Desktop on macOS/Windows), Python 3.10 or newer (tested with 3.13), `make`,
-`openssl`, `bash`. On Windows use WSL (below). Developed and verified on macOS (Apple silicon) with Docker 29;
+`openssl`, `bash`; for the web frontend (`make lab`) also Node.js 20 or newer with npm (tested with Node.js 22). On Windows use WSL (below). Developed and verified on macOS (Apple silicon) with Docker 29;
 CI runs everything on GitHub's x86_64 Ubuntu runners (section 13).
 
 ```bash
@@ -135,8 +140,10 @@ Every step prints `PASS`/`FAIL`; any failure makes `make` exit non-zero.
 | Command | Does |
 |---|---|
 | `make demo` | everything above |
-| `make test` | start the server if needed, run all 260 tests with coverage of `app/` |
-| `make unit` | only the 100 unit tests - no server, no Docker needed |
+| `make lab` | the **MariaDB Interactive Lab** (below): build the frontend, start the API, open <http://127.0.0.1:8000> |
+| `make test` | start the server if needed, run all 353 tests with coverage of `app/` |
+| `make unit` | only the 157 unit tests - no server, no Docker needed |
+| `make frontend-test` | the frontend's type check and unit tests (Node.js) |
 | `make lint` | ruff (Python) and shellcheck (shell scripts) |
 | `make roles` / `make examples` / `make experiments` | one part of the demo |
 | `make lockout` | experiment 14 on its own disposable server |
@@ -144,7 +151,61 @@ Every step prints `PASS`/`FAIL`; any failure makes `make` exit non-zero.
 | `make sql USER=smith_professor` | `mariadb` client as that account (asks for the password) |
 | `make shell` | `mariadb` client as root, through the container socket - no password |
 | `python app/menu.py` (after `make set-password`) | interactive menu: log in as any role and try actions |
-| `make down` / `make reset` / `make clean` | stop / stop and delete data / also delete certs and venv |
+| `make down` / `make reset` / `make clean` | stop / stop and delete data / also delete certs, venv and the frontend build |
+
+### The MariaDB Interactive Lab (web frontend)
+
+```bash
+make lab
+# MariaDB Interactive Lab: http://127.0.0.1:8000/   (Ctrl+C stops it)
+# Connected to MariaDB 13.1.2-MariaDB-ubu2604 over verified TLS; demo accounts ready.
+```
+
+`make lab` does everything `make setup` does, plus `npm ci` and a production build of [frontend/](frontend/), then
+starts [app/lab_server.py](app/lab_server.py) on `127.0.0.1` only. Open <http://127.0.0.1:8000>. It has four pages:
+
+* **SQL Playground.** 21 preloaded statements in five groups (roles and GRANT, DENY, column privileges, where the
+  limits are, authentication and TLS). Pick one and it loads its SQL, the account it runs as, and four short notes:
+  what it does, which MariaDB feature it shows, why that matters, and what to observe. **Run query** sends it to
+  MariaDB *as that account* (`alice_student`, `smith_professor`, `jones_finance` or `uni_admin`) over verified TLS
+  with ED25519. The result shows the rows or MariaDB's error, the time measured by the backend, the account and its
+  active role, and whether the answer matches the documented one. **Compare all roles** sends the same statement
+  once per account. You can edit the SQL.
+* **Analytics.** Live summary cards (server and TLS, dataset size, accounts) and four benchmark scenarios that run
+  on your server when you press the button: the **access matrix** (4 roles x 6 actions against the documented
+  policy), **failed logins** (the error code of N logins with unknown names vs. a real name: finding 12, live),
+  **TLS 1.2 vs TLS 1.3** connection cost, and **one SELECT through four privilege paths**. Each result prints its
+  method and number of runs, reports median, mean, stdev, min, p95 and max rather than single numbers, and says so
+  when a difference is within the run-to-run spread. Every chart has a table view. Nothing is precomputed.
+* **Documentation.** A summary of this README (overview, the MariaDB features, architecture, schema, setup, example
+  queries, findings, limitations), with copyable commands. This README stays the complete reference.
+* **Home.** What the project is, the area, and links.
+
+**What the lab will and will not run.** The browser never sees a credential: the API holds the demo accounts' random
+in-memory passwords (given by the harness, as in `make demo`). Each statement runs as the chosen demo account, so
+MariaDB's privileges are the real limit (the playground's "admin" cannot read `mysql.user` either). In front of that,
+[app/lab.py](app/lab.py) accepts one statement per request, and only `SELECT`, `SHOW`, `WITH`, `DESCRIBE`,
+`EXPLAIN` or a single `INSERT`/`UPDATE`/`DELETE`. It refuses DDL, `GRANT`/`DENY`, `SET`, `CALL`, executable
+comments and multi-statement text before they reach the server. Every statement runs inside a transaction that is
+**always rolled back**, so the data never changes, with a server-side `max_statement_time` of 5 s and at most 200
+rows returned. The API accepts only JSON POSTs, refuses a `Host` header other than this machine (DNS rebinding),
+sends no CORS headers, and has no debug mode.
+
+**Development** (hot reload): `make lab-api` in one terminal (API on port 8000), and
+`cd frontend && npm ci && npm run dev` in another (<http://127.0.0.1:5173>, which proxies `/api`). The frontend is
+React 19, TypeScript, Vite, Tailwind CSS, Recharts and lucide icons; the API uses only the Python standard library
+plus the project's existing connection code. Endpoints: `GET /api/health`, `GET /api/examples`, `POST /api/query`,
+`GET /api/stats`, `GET /api/scenarios`, `POST /api/benchmark`. Set `LAB_PORT` in `.env` to use another port.
+
+| SQL Playground: one statement, four accounts | Analytics: the access matrix, measured live |
+|---|---|
+| ![The same UPDATE sent as each role: student and finance get error 1142, the professor and the admin may change the grade (rolled back)](docs/screenshots/playground-compare.png) | ![Allowed vs. denied per role, 24/24 answers match the documented policy](docs/screenshots/analytics-access-matrix.png) |
+| **Analytics: failed logins (finding 12)** | **Analytics: TLS 1.2 vs TLS 1.3, 30 runs each** |
+| ![30 unknown user names and 30 wrong passwords: every attempt answered 1045](docs/screenshots/analytics-failed-logins.png) | ![Median connection time per TLS version and every run in order; the difference is within the spread](docs/screenshots/analytics-tls.png) |
+
+More screenshots: [home](docs/screenshots/home.png), [documentation page](docs/screenshots/docs.png),
+[phone width](docs/screenshots/mobile.png). They were taken from a `make lab` started in a fresh copy of the
+repository; the numbers in them are from that run and will differ slightly on your machine.
 
 **Windows, or without `make`.** On Windows the simplest route is **WSL** (Ubuntu) with Docker Desktop's WSL
 integration turned on: clone the repository inside WSL and use the `make` commands above unchanged. Without
@@ -219,16 +280,17 @@ Files: [sql/01_schema.sql](sql/01_schema.sql), [sql/02_data.sql](sql/02_data.sql
 ## 5. Architecture
 
 ```
-  python app/demo.py ─┐
-  python app/menu.py ─┼──►  app/database.py ══ TLS 1.2/1.3, server cert verified ══►  MariaDB 13.1 (Docker)
-  pytest (tests/)    ─┤     (ED25519 login,                                        ├─ require_secure_transport=ON
-  app/sqlrunner.py ───┘      ssl_verify_cert + identity,                           ├─ roles / GRANT / DENY decide every query
-         ▲                   client cert for the harness)                          ├─ password policy plugins
-         │                                                                          └─ mysql.global_priv holds the rules
-  examples/*.sql, experiments/*.sql                                                         ▲
-  (annotated SQL; each step states                                                          │ unix_socket, no password
-   what MariaDB must answer)         app/admin.py ── docker exec ... mariadb (root) ────────┘ (creates/drops the
-                                                                                             short-lived harness)
+  python app/demo.py ───────────┐
+  python app/menu.py ───────────┤
+  browser ─► app/lab_server.py ─┼──►  app/database.py ══ TLS 1.2/1.3, server cert verified ══►  MariaDB 13.1 (Docker)
+  (frontend/, make lab)         │     (ED25519 login,                                        ├─ require_secure_transport=ON
+  pytest (tests/) ──────────────┤      ssl_verify_cert + identity,                           ├─ roles / GRANT / DENY decide every query
+  app/sqlrunner.py ─────────────┘      client cert for the harness)                          ├─ password policy plugins
+         ▲                                                                                   └─ mysql.global_priv holds the rules
+         │                                                                                            ▲
+  examples/*.sql, experiments/*.sql                                                                   │ unix_socket, no password
+  (annotated SQL; each step states             app/admin.py ── docker exec ... mariadb (root) ────────┘ (creates/drops the
+   what MariaDB must answer)                                                                           short-lived harness)
 ```
 
 * [app/database.py](app/database.py) opens connections: ED25519 login, TLS with `ssl_verify_cert=True` and
@@ -242,6 +304,11 @@ Files: [sql/01_schema.sql](sql/01_schema.sql), [sql/02_data.sql](sql/02_data.sql
 * [app/sqlrunner.py](app/sqlrunner.py) executes the annotated `.sql` tutorial files as the user named in each
   step and compares the result with the file's stated expectation. The SQL files are the experiments;
   pytest runs them too, so documentation cannot drift from reality.
+* [app/lab_server.py](app/lab_server.py) and [app/lab.py](app/lab.py) are the Interactive Lab's API: a
+  standard-library HTTP server on `127.0.0.1` that runs one checked, always-rolled-back statement as a demo
+  account, reads server statistics through the harness, and runs the benchmark scenarios.
+  [app/lab_examples.py](app/lab_examples.py) holds the playground's 21 examples with their documented answers.
+  [frontend/](frontend/) is the React/TypeScript single-page app; it calls only `/api/*` and holds no credential.
 * [tests/unit/](tests/unit/) need no server; [tests/integration/](tests/integration/) run against the real one.
 * [docker-compose.yml](docker-compose.yml) starts MariaDB with TLS; the port is published on `127.0.0.1` only.
 
@@ -683,32 +750,37 @@ the metadata leaks of section 11; and a role-attached DENY next to a second sour
 
 ## 13. Test results
 
-All numbers are from real runs on 2026-10-11 against `13.1.2-MariaDB-ubu2604`, from a **fresh clone of `main`**
-in a new directory (macOS, arm64), and from GitHub Actions (Ubuntu, x86_64):
+All numbers are from real runs against `13.1.2-MariaDB-ubu2604` on macOS (arm64), on 2026-10-19, in a **fresh
+copy of the repository** in a new directory: no certificates, virtual environment, `node_modules` or server yet,
+and its own container name and port (`MARIADB_CONTAINER`, `MARIADB_PORT`), next to the developer's running copy:
 
-| Command (fresh clone) | Result |
+| Command (fresh copy) | Result |
 |---|---|
-| `make clean && make demo` | exit 0 - role demo **24/24** actions as expected; tutorial examples **108/108** steps; experiments 1-13 **373/373** steps; no FAIL ([docs/demo-output.txt](docs/demo-output.txt)) |
+| `make demo` | exit 0 - role demo **24/24** actions as expected; tutorial examples **108/108** steps; experiments 1-13 **373/373** steps; no FAIL ([docs/demo-output.txt](docs/demo-output.txt)) |
 | `make demo` a second time | exit 0, identical totals (idempotent) |
-| `make test` | **260 passed** (100 unit + 160 integration) in about 3 s; coverage of `app/` **95 %** ([docs/test-output.txt](docs/test-output.txt)) |
+| `make test` | **353 passed** (157 unit + 196 integration) in about 15 s; coverage of `app/` **96 %** ([docs/test-output.txt](docs/test-output.txt)) |
 | `make lint` | ruff: all checks passed; shellcheck: no findings |
+| `make frontend-test frontend` | `tsc` clean, **10** frontend unit tests passed, production build succeeded |
+| `make lab` | the lab started; all four pages loaded in headless Chromium, every playground example and benchmark scenario ran, no browser console errors ([docs/screenshots/](docs/screenshots/)) |
 | `make lockout` | **13/13** steps passed on a disposable server ([docs/lockout-output.txt](docs/lockout-output.txt)) |
-| `make unit` with the server stopped | 100 passed; the integration tests stop at once with one message and exit code 3 |
-| two copies side by side (`MARIADB_CONTAINER`/`MARIADB_PORT`) | `make test` passed in the second copy while the first was running |
+| `make unit` with the server stopped | 157 passed; the integration tests stop at once with one message and exit code 3 |
+| two copies side by side (`MARIADB_CONTAINER`/`MARIADB_PORT`) | every command above passed in the second copy while the first was running |
 
 Coverage per module (`make test`): `actions.py` 100 %, `admin.py` 91 %, `database.py` 96 %, `demo.py` 90 %,
-`menu.py` 93 %, `sqlrunner.py` 97 %. The uncovered lines are mostly `if __name__ == "__main__"` entry points
-and error branches for a missing Docker binary.
+`lab.py` 98 %, `lab_server.py` 96 %, `menu.py` 93 %, `sqlrunner.py` 97 %. The uncovered lines are mostly
+`if __name__ == "__main__"` entry points and error branches for a missing Docker binary.
 
 **Continuous integration** ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every push to
-`main` on GitHub-hosted Ubuntu runners: install dependencies, `make lint`, start the pinned MariaDB image
-with the same `docker-compose.yml` (TLS, `unix_socket` root via `docker exec`, the X509 harness - nothing is
-mocked or skipped), `make test`, `make demo`, `make lockout`. The `canary` job repeats the tests on the floating
+`main` on GitHub-hosted Ubuntu runners: install dependencies, `make lint`, the frontend's type check, unit tests
+and build (`make frontend-test frontend`), start the pinned MariaDB image with the same `docker-compose.yml` (TLS,
+`unix_socket` root via `docker exec`, the X509 harness - nothing is mocked or skipped), `make test` (which includes
+the lab's API tests), `make demo`, `make lockout`. The `canary` job repeats the tests on the floating
 `13.1` tag and may fail without failing the workflow. Example of a complete green run, for commit `b3e8bf0`:
 <https://github.com/alexkhovrenkov/test_project_DB/actions/runs/38141173223> - lint clean, 260 passed, coverage
 95 %, role demo 24/24, 108 + 373 steps, lockout 13/13 (identical numbers in the canary job). The badge at the
 top shows the status of the latest commit. CI also caught a real problem: the run for the A2 commit failed
-once, which led to finding 12.
+once, which led to finding 12. The linked run predates the Interactive Lab; the lab and its CI steps were verified
+locally as described above, and a CI run covers them from the first push that contains them.
 
 Test files:
 
@@ -725,15 +797,19 @@ Test files:
 | [integration/test_tls.py](tests/integration/test_tls.py) | verified connection and protocol version, wrong CA, host-name mismatch, plaintext refused, verification-off lesson, PyMySQL's unverified default |
 | [integration/test_experiments.py](tests/integration/test_experiments.py) | runs all 18 `.sql` tutorial and experiment files; any mismatching step fails with the step-by-step output |
 | [integration/test_tools.py](tests/integration/test_tools.py) | the role demo, the runner's command line, the interactive menu and `set-password`, driven with typed input |
+| [unit/test_lab_api.py](tests/unit/test_lab_api.py) | the lab's statement check (allowed kinds, DDL/GRANT/SET/multi-statement/executable comments refused), value conversion, statistics and honest headlines, the example catalogue, the HTTP layer (status codes, JSON-only POST, foreign `Host` refused, static files, no path traversal), start-up and shutdown with Docker or MariaDB unavailable |
+| [integration/test_lab.py](tests/integration/test_lab.py) | every one of the 21 playground examples gets exactly its documented answer; writes are rolled back; timeout (1969) and row limit; the same statement per role; statistics and auth chains; all four benchmark scenarios; the lab's own TLS context refuses a foreign CA; the HTTP API end to end; no password ever appears in an API answer |
+| [frontend/src/*.test.ts](frontend/src/) | result formatting, expectation matching, API error handling, the router (Vitest) |
 
 Tests use random throw-away names (`t_lab_<hex>`, `t_pw_<hex>`) and clean up; after a run the server is as
 `sql/` left it.
 
 **Do the tests actually test?** Mutation checks on the final suite, run for real: with the professor's DENY
-revoked (`REVOKE DENY SELECT ON university.financial_records FROM professor_role`) **11 of 260 tests failed** -
+revoked (`REVOKE DENY SELECT ON university.financial_records FROM professor_role`) **18 of 353 tests failed** -
 the professor/financial cell of the role matrix, the later-GRANT test, the JOIN test, the `SHOW TABLES` test,
 the SHOW GRANTS visibility test, the `mysql.global_priv` JSON test, experiments 6 and 10, the professor's role
-demo (twice) and the interactive-menu test; restoring the DENY gave 260 passed again. With
+demo (twice), the interactive-menu test, and seven lab tests (three playground examples, the per-role comparison,
+the statistics, the access matrix and the HTTP API); restoring the DENY gave 353 passed again. With
 `certs/server-key.pem` set to mode 644 the key-permission unit test failed; `make certs` set it back to 600.
 
 ## 14. Reproducing everything
@@ -749,8 +825,11 @@ demo (twice) and the interactive-menu test; restoring the DENY gave 260 passed a
 | ED25519 attacks (section 8) | `.venv/bin/python -m pytest tests/integration/test_authentication.py -v` | all PASSED |
 | TLS attacks (section 9) | `.venv/bin/python -m pytest tests/integration/test_tls.py -v` | all PASSED |
 | DENY semantics (section 7) | `.venv/bin/python -m pytest tests/integration/test_deny_semantics.py -v` | all PASSED |
-| Everything, verbosely | `.venv/bin/python -m pytest -v` | 260 passed |
-| Server-free part | `make unit` | 100 passed |
+| Everything, verbosely | `.venv/bin/python -m pytest -v` | 353 passed |
+| Server-free part | `make unit` | 157 passed |
+| The Interactive Lab | `make lab`, open <http://127.0.0.1:8000> | Playground: each example shows "matches"; Analytics: access matrix 24/24, failed logins all 1045 |
+| The lab's API against the server | `.venv/bin/python -m pytest tests/integration/test_lab.py -v` | all PASSED |
+| Frontend checks | `make frontend-test frontend` | 10 passed, build succeeded |
 | Lint | `make lint` | `lint: no findings` |
 | Password-free account model (section 8) | `.venv/bin/python -m pytest tests/integration/test_account_model.py -v` | all PASSED |
 | By hand, as a role | `make set-password USER=smith_professor`, then `make sql USER=smith_professor` | section 7 |
@@ -805,6 +884,20 @@ demo (twice) and the interactive-menu test; restoring the DENY gave 260 passed a
 * `MariaDB 13.1` is a **preview** release; the findings in section 11 (especially finding 1) may change in newer
   builds. The project pins the verified build by digest; the floating tag is only used when you choose it.
 * `make` is required for the one-command workflow (on Windows use WSL, or the plain commands in section 3).
+* **The Interactive Lab's API has no login of its own.** While `make lab` runs, any program or user on *this
+  computer* can send it statements (it listens on `127.0.0.1` only, refuses foreign `Host` headers and non-JSON
+  POSTs, so web pages in a browser cannot). What they can do is limited to the four demo accounts' privileges,
+  one checked statement at a time, always rolled back. Stop it with Ctrl+C when you are done; it then drops its
+  temporary administrator account (also on `kill`/SIGTERM).
+* Starting the lab, like `make demo` and `make test`, gives the demo accounts new random passwords, so a password
+  chosen with `make set-password` must be set again afterwards.
+* The lab's timings come from one machine, Docker networking included, at whatever else the machine is doing:
+  medians with spread and the method are reported, but this is not a controlled benchmark.
+* The project's CA certificate has no `keyUsage` extension. Python 3.13's default TLS context
+  (`VERIFY_X509_STRICT`) rejects such a CA; PyMySQL's `ssl_ca` option, used everywhere else, does not set that
+  flag. The lab's own TLS benchmark therefore clears just that flag, keeping certificate-chain and host-name
+  verification (a test checks that a foreign CA is still refused). Adding `keyUsage` in
+  [scripts/generate_certs.sh](scripts/generate_certs.sh) would remove the need.
 
 ## 16. Troubleshooting
 
@@ -821,19 +914,23 @@ demo (twice) and the interactive-menu test; restoring the DENY gave 260 passed a
 | A test says `DENY on an inherited role is now enforced immediately` | The server's behaviour changed (finding 1): update section 11 and experiment 2. |
 | An experiment was interrupted and left objects | Re-run it; every file starts by dropping its own leftovers. `make reset` always restores a pristine server. |
 | `06_lockdown.sh: Permission denied` in `docker compose logs mariadb` | `chmod +x sql/06_lockdown.sh`, then `make reset && make demo`. |
+| `npm not found` during `make lab` | Install Node.js 20 or newer (it includes npm); the rest of the project does not need it. |
+| The lab shows a red "MariaDB unreachable" banner | Start Docker Desktop and run `make up`; the lab retries on every request, no restart needed. |
+| The lab page says "Cannot reach the lab backend" | The Python server is not running: start `make lab` (or `make lab-api` while developing). |
+| `Address already in use` on port 8000 | Set another port in `.env`: `LAB_PORT=8001`. |
 
 ## 17. Repository layout
 
 ```
 ├── README.md                    this document
 ├── Makefile                     make demo | test | unit | lint | roles | examples | experiments | lockout |
-│                                     set-password | sql | shell | down | reset | clean
+│                                     lab | lab-api | frontend-test | set-password | sql | shell | down | reset | clean
 ├── docker-compose.yml           MariaDB 13.1 (pinned build) with TLS; no passwords; key copied in owner-only
 ├── .env.example                 optional non-secret settings (port, container name, image) - no passwords
 ├── requirements.txt             pymysql[ed25519], python-dotenv
 ├── requirements-dev.txt         + pytest, pytest-cov, ruff
 ├── ruff.toml, pytest.ini        lint and test configuration
-├── .github/workflows/ci.yml     CI: lint, MariaDB 13.1 container, tests + coverage, demo, lockout; canary job
+├── .github/workflows/ci.yml     CI: lint, frontend checks + build, MariaDB 13.1 container, tests + coverage, demo, lockout; canary job
 ├── sql/                         run by the image on first start, in this order:
 │   ├── 01_schema.sql            tables
 │   ├── 02_data.sql              fake data
@@ -849,17 +946,25 @@ demo (twice) and the interactive-menu test; restoring the DENY gave 260 passed a
 │   ├── actions.py               the university SQL (fixed strings) + validated update_grade
 │   ├── demo.py                  six actions x four roles, expected/actual/PASS-FAIL
 │   ├── menu.py                  interactive version
-│   └── sqlrunner.py             runs annotated .sql files as different users
+│   ├── sqlrunner.py             runs annotated .sql files as different users
+│   ├── lab_server.py            the Interactive Lab's HTTP API + static files (127.0.0.1, stdlib only)
+│   ├── lab.py                   statement check, rolled-back execution as a demo account, stats, benchmarks
+│   └── lab_examples.py          the playground's 21 examples with their documented answers
+├── frontend/                    the Interactive Lab: React + TypeScript + Vite + Tailwind CSS + Recharts
+│   ├── src/pages/               Home, Playground, Analytics, Docs
+│   ├── src/components/          layout, SQL editor, result panel, UI pieces
+│   └── src/api.ts               the only code that talks to the backend
 ├── examples/                    5 standalone SQL lessons + README with a 10-minute "Start here"
 ├── experiments/                 13 annotated SQL experiments + 14_public_lockout.sh (disposable server)
 ├── tests/
-│   ├── unit/                    100 tests, no server needed
-│   └── integration/             160 tests against the real server
+│   ├── unit/                    157 tests, no server needed
+│   └── integration/             196 tests against the real server
 └── docs/
     ├── demo-output.txt          complete output of `make demo` from a fresh clone
     ├── test-output.txt          `pytest -v` with coverage, same run
     ├── lockout-output.txt       `make lockout`, same run
-    └── upstream-report-nested-role-deny.md   bug report for finding 1, prepared (not filed)
+    ├── upstream-report-nested-role-deny.md   bug report for finding 1, prepared (not filed)
+    └── screenshots/             the Interactive Lab, taken from a fresh copy
 ```
 
 ## 18. Team

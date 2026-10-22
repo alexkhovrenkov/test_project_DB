@@ -1,6 +1,7 @@
 # Continuous integration: starts the real MariaDB 13.1 server (the same Docker
 # image and docker-compose.yml as on a developer machine, including TLS and
-# ED25519), runs the whole pytest suite against it and then the full demo.
+# ED25519), runs the whole pytest suite against it (including the Interactive Lab's
+# API) and then the full demo. The lab's frontend is type-checked, unit-tested and built.
 #
 # Everything is covered on GitHub-hosted runners: Docker is preinstalled, and the
 # MariaDB Foundation's 13.1 image is public on quay.io. Nothing is mocked.
@@ -45,8 +46,17 @@ jobs:
       - name: Install Python dependencies
         run: make venv
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
       - name: Lint (ruff + shellcheck)
         run: make lint
+
+      - name: Frontend - type check, unit tests, production build
+        run: make frontend-test frontend
 
       - name: Start MariaDB 13.1 (fresh certificates, TLS on, no passwords)
         run: make up

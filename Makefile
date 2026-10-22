@@ -13,11 +13,13 @@ export
 PYTHON    := .venv/bin/python
 COMPOSE   := docker compose
 CONTAINER := $(or $(MARIADB_CONTAINER),university-db)
+LAB_PORT  ?= 8000
 # USER=... only counts when given on the command line (otherwise $(USER) is your login name).
 USER_NAME := $(if $(filter command line,$(origin USER)),$(USER),)
 
 .DEFAULT_GOAL := help
-.PHONY: help certs up venv setup demo roles examples experiments test unit set-password shell sql lockout down reset clean lint
+.PHONY: help certs up venv setup demo roles examples experiments test unit set-password shell sql lockout down reset clean lint \
+        lab lab-api frontend frontend-test
 
 help:
 	@echo "make demo                   start MariaDB 13.1 (first run: also certificates and venv) and run every demonstration"
@@ -34,6 +36,9 @@ help:
 	@echo "make reset                  stop the server and DELETE its data; next 'make up' starts from scratch"
 	@echo "make clean                  reset + delete certificates and the virtual environment"
 	@echo "make lint                   ruff (Python) + shellcheck (shell scripts; uses its Docker image if not installed)"
+	@echo "make lab                    the MariaDB Interactive Lab (web frontend + API) on http://127.0.0.1:$(LAB_PORT)"
+	@echo "make lab-api                only the lab's API (for frontend development with: cd frontend && npm run dev)"
+	@echo "make frontend-test          frontend unit tests + type check (needs Node.js)"
 
 certs:
 	@if [ ! -f certs/client-key.pem ]; then bash scripts/generate_certs.sh; fi
@@ -92,7 +97,27 @@ reset:
 	$(COMPOSE) down -v
 
 clean: reset
-	rm -rf .venv certs .pytest_cache
+	rm -rf .venv certs .pytest_cache frontend/node_modules frontend/dist
+
+# --- MariaDB Interactive Lab (frontend/, app/lab_server.py) ---------------------------------
+NPM := npm --prefix frontend
+
+frontend/node_modules/.package-lock.json: frontend/package.json frontend/package-lock.json
+	@command -v npm >/dev/null || { echo "npm not found: install Node.js 20 or newer (https://nodejs.org)"; exit 2; }
+	$(NPM) ci --no-audit --no-fund
+
+frontend: frontend/node_modules/.package-lock.json
+	$(NPM) run build
+
+frontend-test: frontend/node_modules/.package-lock.json
+	$(NPM) run typecheck
+	$(NPM) test
+
+lab: setup frontend
+	$(PYTHON) app/lab_server.py --port $(LAB_PORT)
+
+lab-api: setup
+	$(PYTHON) app/lab_server.py --port $(LAB_PORT)
 
 SHELL_SCRIPTS := scripts/*.sh sql/*.sh experiments/*.sh
 
