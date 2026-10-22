@@ -1,0 +1,293 @@
+"""
+lab_examples.py - the preloaded demonstrations of the Interactive Lab's SQL Playground.
+
+Each example is one SQL statement, run as one of the four demo accounts. The
+`expect` entry states what MariaDB answers (verified on 13.1.2, and checked by
+tests/integration/test_lab.py, so the explanations cannot drift from the
+server's real behaviour):
+
+    {"outcome": "allowed", "rows": N}       N rows returned (or affected, for a write)
+    {"outcome": "denied",  "error": CODE}   MariaDB refused with that error code
+    {"outcome": "error",   "error": CODE}   any other error (e.g. a missing table)
+
+Writes are executed inside a transaction that the lab always rolls back.
+"""
+
+CATEGORIES = [
+    ("roles", "Roles and GRANT"),
+    ("deny", "DENY (MariaDB 13.1)"),
+    ("columns", "Column privileges"),
+    ("limits", "Where the limits are"),
+    ("auth", "Authentication and TLS"),
+]
+
+EXAMPLES = [
+    # --- Roles and GRANT ---------------------------------------------------------------
+    {
+        "id": "student-courses",
+        "category": "roles",
+        "title": "Student reads the course catalogue",
+        "role": "student",
+        "sql": "SELECT code, title, credits, professor\nFROM courses;",
+        "feature": "GRANT SELECT ON university.courses TO student_role",
+        "what": "Alice (student_role) lists every course.",
+        "why": "Privileges are given to the role once; every student account inherits them.",
+        "observe": "4 rows. Now pick another role and press Run: finance gets error 1142.",
+        "expect": {"outcome": "allowed", "rows": 4},
+    },
+    {
+        "id": "student-all-grades",
+        "category": "roles",
+        "title": "Student tries to read ALL grades",
+        "role": "student",
+        "sql": "SELECT grade_id, student_id, course_id, grade\nFROM grades;",
+        "feature": "No GRANT = no access",
+        "what": "Alice asks for the whole grades table.",
+        "why": "MariaDB is deny-by-default: student_role was never granted the grades table.",
+        "observe": "Error 1142 \"SELECT command denied ... for table grades\". The app does not check anything.",
+        "expect": {"outcome": "denied", "error": 1142},
+    },
+    {
+        "id": "student-my-grades",
+        "category": "roles",
+        "title": "Student reads only their own grades (view)",
+        "role": "student",
+        "sql": "SELECT code, title, grade\nFROM my_grades;",
+        "feature": "SQL SECURITY DEFINER view filtered by USER()",
+        "what": "The my_grades view joins grades, students and courses and keeps only the rows "
+                "whose students.db_username is the connected account.",
+        "why": "Row-level security inside MariaDB: the student needs no privilege on grades itself. "
+               "The view's definer is a locked account that may only read three tables.",
+        "observe": "2 rows: Alice's own grades only.",
+        "expect": {"outcome": "allowed", "rows": 2},
+    },
+    {
+        "id": "student-widen-view",
+        "category": "roles",
+        "title": "Student tries to widen the view with OR 1 = 1",
+        "role": "student",
+        "sql": "SELECT code, title, grade\nFROM my_grades\nWHERE grade > 0 OR 1 = 1;",
+        "feature": "The filter lives inside the view",
+        "what": "An injection-style condition added on top of the view.",
+        "why": "The user's WHERE clause is applied after the view's own filter, so it can only "
+               "remove rows, never add any.",
+        "observe": "Still the same 2 rows.",
+        "expect": {"outcome": "allowed", "rows": 2},
+    },
+    # --- DENY -------------------------------------------------------------------------------
+    {
+        "id": "professor-grades",
+        "category": "deny",
+        "title": "Professor reads all grades (database-wide GRANT)",
+        "role": "professor",
+        "sql": "SELECT grade_id, student_id, course_id, grade\nFROM grades;",
+        "feature": "GRANT SELECT ON university.* TO professor_role",
+        "what": "One broad grant covers every table in the database, including future ones.",
+        "why": "This is the baseline for the next example: the same grant also covers financial_records.",
+        "observe": "7 rows.",
+        "expect": {"outcome": "allowed", "rows": 7},
+    },
+    {
+        "id": "professor-financial",
+        "category": "deny",
+        "title": "Professor reads bank details: DENY wins",
+        "role": "professor",
+        "sql": "SELECT student_id, tuition_due, bank_iban\nFROM financial_records;",
+        "feature": "DENY SELECT ON university.financial_records TO professor_role",
+        "what": "The broad grant says yes, the DENY on one table says no.",
+        "why": "A negative grant beats every positive grant, including grants made later. Without "
+               "DENY you would have to grant table by table and remember every new table.",
+        "observe": "Error 1142, although GRANT SELECT ON university.* includes this table.",
+        "expect": {"outcome": "denied", "error": 1142},
+    },
+    {
+        "id": "professor-join",
+        "category": "deny",
+        "title": "Professor tries to reach the denied table through a JOIN",
+        "role": "professor",
+        "sql": "SELECT s.last_name, f.bank_iban\nFROM students s\nJOIN financial_records f "
+               "ON f.student_id = s.student_id;",
+        "feature": "DENY applies to every reference to the table",
+        "what": "students is readable, financial_records is denied; the JOIN needs both.",
+        "why": "Privileges are checked for every table a statement touches, not only the first one.",
+        "observe": "Error 1142 for financial_records: no row leaks through the join.",
+        "expect": {"outcome": "denied", "error": 1142},
+    },
+    {
+        "id": "professor-show-tables",
+        "category": "deny",
+        "title": "Professor lists the tables",
+        "role": "professor",
+        "sql": "SHOW TABLES;",
+        "feature": "DENY hides the table from metadata",
+        "what": "The list of tables the professor can see.",
+        "why": "MariaDB filters SHOW TABLES and information_schema by privilege.",
+        "observe": "4 rows: courses, grades, my_grades, students. financial_records is missing.",
+        "expect": {"outcome": "allowed", "rows": 4},
+    },
+    {
+        "id": "professor-show-grants",
+        "category": "deny",
+        "title": "Professor looks at their own grants",
+        "role": "professor",
+        "sql": "SHOW GRANTS;",
+        "feature": "SHOW GRANTS and DENY visibility",
+        "what": "The professor's account, its role and the role's grants.",
+        "why": "DENY lines are shown only to accounts that can read the mysql schema. An "
+               "administrator sees \"DENY SELECT ON university.financial_records TO professor_role\".",
+        "observe": "6 lines, none starting with DENY. The ED25519 line shows a public key, not a password.",
+        "expect": {"outcome": "allowed", "rows": 6},
+    },
+    # --- Column privileges -----------------------------------------------------------------
+    {
+        "id": "professor-update-grade",
+        "category": "columns",
+        "title": "Professor changes a grade",
+        "role": "professor",
+        "sql": "UPDATE grades\nSET grade = 1.0\nWHERE grade_id = 1;",
+        "feature": "GRANT UPDATE (grade) ON university.grades TO professor_role",
+        "what": "A write to the one column the professor may change.",
+        "why": "Column-level privileges: correct a grade, but nothing else about it.",
+        "observe": "1 row affected. The lab always rolls back, so the data stays as it was.",
+        "expect": {"outcome": "allowed", "rows": 1},
+    },
+    {
+        "id": "professor-update-student",
+        "category": "columns",
+        "title": "Professor moves a grade to another student",
+        "role": "professor",
+        "sql": "UPDATE grades\nSET student_id = 2\nWHERE grade_id = 1;",
+        "feature": "Column-level privilege, refused at column level",
+        "what": "The same table, a different column.",
+        "why": "Reassigning a grade is a different action from correcting it, so it gets a different privilege.",
+        "observe": "Error 1143 \"... for column 'student_id'\" (column level, not 1142).",
+        "expect": {"outcome": "denied", "error": 1143},
+    },
+    {
+        "id": "student-update-grade",
+        "category": "columns",
+        "title": "Student tries to improve their own grade",
+        "role": "student",
+        "sql": "UPDATE grades\nSET grade = 1.0\nWHERE grade_id = 2;",
+        "feature": "No UPDATE privilege",
+        "what": "Alice writes to the grades table.",
+        "why": "Reading your grade through a view gives no right to change the table behind it.",
+        "observe": "Error 1142 \"UPDATE command denied\".",
+        "expect": {"outcome": "denied", "error": 1142},
+    },
+    {
+        "id": "finance-iban",
+        "category": "columns",
+        "title": "Finance reads the bank details",
+        "role": "finance",
+        "sql": "SELECT student_id, tuition_due, amount_paid, bank_iban\nFROM financial_records;",
+        "feature": "GRANT SELECT, INSERT, UPDATE ON financial_records TO finance_role",
+        "what": "The one role that should see IBANs.",
+        "why": "Compare with the professor: same table, different role, different answer.",
+        "observe": "5 rows. Finance can copy every IBAN it may read; permissions cannot prevent misuse.",
+        "expect": {"outcome": "allowed", "rows": 5},
+    },
+    # --- Where the limits are ----------------------------------------------------------------
+    {
+        "id": "missing-table",
+        "category": "limits",
+        "title": "Denied vs. missing table: the error code leaks",
+        "role": "professor",
+        "sql": "SELECT *\nFROM salaries_2026;",
+        "feature": "Metadata leak through error codes (finding 5)",
+        "what": "A table that does not exist.",
+        "why": "A denied table gives 1142, a missing one 1146. SHOW TABLES hides financial_records, "
+               "but the error code still proves it exists.",
+        "observe": "Error 1146 \"doesn't exist\". Compare with 1142 for financial_records.",
+        "expect": {"outcome": "error", "error": 1146},
+    },
+    {
+        "id": "admin-mysql-schema",
+        "category": "limits",
+        "title": "University admin tries to read the account table",
+        "role": "admin",
+        "sql": "SELECT User, Host\nFROM mysql.user;",
+        "feature": "GRANT ALL ON university.* is not GRANT ALL ON *.*",
+        "what": "uni_admin has every privilege inside university, and nothing outside it.",
+        "why": "Database-level grants keep the application administrator away from account management.",
+        "observe": "Error 1142 for table mysql.user.",
+        "expect": {"outcome": "denied", "error": 1142},
+    },
+    {
+        "id": "admin-delete",
+        "category": "limits",
+        "title": "University admin deletes a grade",
+        "role": "admin",
+        "sql": "DELETE FROM grades\nWHERE grade_id = 7;",
+        "feature": "GRANT ALL PRIVILEGES ON university.* TO admin_role",
+        "what": "Inside its own database the admin may do anything.",
+        "why": "Roles define what is possible, not what is wise: auditing is a separate control.",
+        "observe": "1 row affected, then rolled back by the lab.",
+        "expect": {"outcome": "allowed", "rows": 1},
+    },
+    {
+        "id": "student-outfile",
+        "category": "limits",
+        "title": "Student tries to write a file on the server",
+        "role": "student",
+        "sql": "SELECT code, title\nFROM courses\nINTO OUTFILE '/tmp/courses.csv';",
+        "feature": "Global FILE privilege",
+        "what": "Export readable data to the server's file system.",
+        "why": "Reading a table does not give the right to touch the server's disk; FILE is a global privilege.",
+        "observe": "Error 1227 \"you need ... the FILE privilege\".",
+        "expect": {"outcome": "denied", "error": 1227},
+    },
+    # --- Authentication and TLS ---------------------------------------------------------------
+    {
+        "id": "whoami",
+        "category": "auth",
+        "title": "Who am I, and which role is active?",
+        "role": "student",
+        "sql": "SELECT CURRENT_USER(), CURRENT_ROLE();",
+        "feature": "Accounts, default roles",
+        "what": "The account MariaDB authenticated and the role activated by SET DEFAULT ROLE.",
+        "why": "Every privilege decision on this page is made for exactly this pair.",
+        "observe": "alice_student@% and student_role. Try the other roles.",
+        "expect": {"outcome": "allowed", "rows": 1},
+    },
+    {
+        "id": "tls-session",
+        "category": "auth",
+        "title": "Is this connection really encrypted?",
+        "role": "student",
+        "sql": "SHOW SESSION STATUS\nWHERE Variable_name IN ('Ssl_version', 'Ssl_cipher');",
+        "feature": "TLS, verified by the client",
+        "what": "The protocol and cipher of the lab's own connection to MariaDB.",
+        "why": "The lab's backend also verified the server certificate and host name against certs/ca.pem; "
+               "a plaintext connection would be refused (require_secure_transport, error 3159).",
+        "observe": "TLSv1.3 and an AES-GCM cipher.",
+        "expect": {"outcome": "allowed", "rows": 2},
+    },
+    {
+        "id": "server-tls-config",
+        "category": "auth",
+        "title": "How the server enforces TLS",
+        "role": "student",
+        "sql": "SHOW GLOBAL VARIABLES\nWHERE Variable_name IN ('have_ssl', 'require_secure_transport', "
+               "'tls_version', 'version');",
+        "feature": "require_secure_transport, tls_version",
+        "what": "The server settings from docker-compose.yml, as the server reports them.",
+        "why": "TLS is a server rule, not a client preference: no account can connect without it.",
+        "observe": "require_secure_transport = ON, tls_version = TLSv1.2,TLSv1.3, version 13.1.x.",
+        "expect": {"outcome": "allowed", "rows": 4},
+    },
+    {
+        "id": "auth-plugins",
+        "category": "auth",
+        "title": "Authentication and password plugins",
+        "role": "student",
+        "sql": "SELECT PLUGIN_NAME, PLUGIN_STATUS, PLUGIN_TYPE\nFROM information_schema.PLUGINS\n"
+               "WHERE PLUGIN_TYPE IN ('AUTHENTICATION', 'PASSWORD VALIDATION');",
+        "feature": "ed25519, unix_socket, simple_password_check, password_reuse_check",
+        "what": "The plugins this server loaded.",
+        "why": "Every demo account logs in with ed25519 (the server stores a public key only); root uses "
+               "unix_socket; two plugins refuse weak and reused passwords.",
+        "observe": "6 rows, all ACTIVE.",
+        "expect": {"outcome": "allowed", "rows": 6},
+    },
+]

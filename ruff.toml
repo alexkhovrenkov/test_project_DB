@@ -7,4 +7,4 @@ select = ["E", "F", "W", "I", "B", "UP"]
 
 [lint.isort]
 # app/ and tests/ modules are imported by bare name (pytest.ini sets pythonpath).
-known-first-party = ["actions", "admin", "conftest", "database", "demo", "menu", "sqlrunner"]
+known-first-party = ["actions", "admin", "conftest", "database", "demo", "lab", "lab_examples", "lab_server", "menu", "sqlrunner"]
