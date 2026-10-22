@@ -1,0 +1,33 @@
+{
+  "name": "mariadb-interactive-lab",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Web frontend for the MariaDB Area 5 project: SQL playground, analytics and documentation.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "lucide-react": "1.59.0",
+    "prismjs": "1.30.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-simple-code-editor": "0.14.1",
+    "recharts": "3.10.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/prismjs": "1.26.5",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.1.2",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
+  }
+}

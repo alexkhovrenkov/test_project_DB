@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --color-navy-950: #0a1426;
+  --color-navy-900: #0f1b33;
+  --color-navy-800: #172743;
+  --color-navy-700: #22365a;
+  --color-accent-50: #eef5fe;
+  --color-accent-100: #cde2fb;
+  --color-accent-500: #2a78d6;
+  --color-accent-600: #256abf;
+  --color-accent-700: #1c5cab;
+  --color-surface: #f6f8fb;
+  /* chart series, validated (dataviz palette, light surface) */
+  --color-series-1: #2a78d6;
+  --color-series-2: #eb6834;
+  --color-series-3: #1baf7a;
+  --color-series-4: #eda100;
+}
+
+html {
+  color-scheme: light;
+}
+body {
+  background: var(--color-surface);
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Prism SQL tokens (react-simple-code-editor) */
+.sql-code .token.keyword { color: #1c5cab; font-weight: 600; }
+.sql-code .token.string { color: #a14a12; }
+.sql-code .token.number { color: #0f7a55; }
+.sql-code .token.comment { color: #64748b; font-style: italic; }
+.sql-code .token.function { color: #6d28d9; }
+.sql-code .token.operator, .sql-code .token.punctuation { color: #475569; }
+.sql-code textarea { outline: none; }
